@@ -1,0 +1,46 @@
+name: Deploy FaaSr Functions
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Deployment platform (aws/github)'
+        required: true
+        type: choice
+        options:
+          - aws
+          - github
+      workflow_file:
+        description: 'Workflow JSON file name'
+        required: true
+        type: string
+        default: 'tutorial_simple.json'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3 pyyaml PyGithub
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v1
+
+      - name: Run deployment script
+        env:
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          python scripts/deploy_functions.py --platform ${{ github.event.inputs.platform }} --workflow-file ${{ github.event.inputs.workflow_file }}
