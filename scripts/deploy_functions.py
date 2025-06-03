@@ -66,11 +66,10 @@ def create_r_lambda_layer(lambda_client, layer_name):
 # Create output directory
 RUN mkdir -p /output
 
-# Copy R installation to output
-RUN cp -r /usr/lib/R /output/R
-
-# Set permissions
-RUN chmod -R 755 /output/R
+# Find R installation path and copy it
+RUN R_HOME=$(R RHOME) && \
+    cp -r $R_HOME /output/R && \
+    chmod -R 755 /output/R
 """
         
         with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
@@ -94,7 +93,7 @@ RUN chmod -R 755 /output/R
         # Extract R installation
         extract_result = subprocess.run(
             ["docker", "run", "--rm", "-v", f"{layer_dir}:/output", "r-builder", 
-             "cp", "-r", "/usr/lib/R", "/output/"],
+             "bash", "-c", "R_HOME=$(R RHOME) && cp -r $R_HOME /output/"],
             capture_output=True,
             text=True
         )
