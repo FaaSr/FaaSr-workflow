@@ -15,6 +15,11 @@ on:
         required: true
         type: string
         default: 'project1.json'
+      folder:
+        description: 'Folder containing R function files'
+        required: true
+        type: string
+        default: 'project1'
 
 jobs:
   deploy:
@@ -36,11 +41,10 @@ jobs:
       - name: Set up Docker
         uses: docker/setup-buildx-action@v1
 
-      - name: Run deployment script
+      - name: Deploy to AWS
         env:
-          PAT: ${{ secrets.PAT }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-        run: |
-          python scripts/deploy_functions.py --platform ${{ github.event.inputs.platform }} --workflow-file ${{ github.event.inputs.workflow_file }}
+          AWS_LAMBDA_ROLE_ARN: ${{ secrets.AWS_LAMBDA_ROLE_ARN }}
+        run: python scripts/deploy_functions.py --platform aws --workflow-file ${{ github.event.inputs.workflow_file }} --folder ${{ github.event.inputs.folder }}

@@ -17,6 +17,8 @@ def parse_arguments():
                       help='Platform to deploy functions to (aws/github)')
     parser.add_argument('--workflow-file', required=True,
                       help='Path to the workflow JSON file')
+    parser.add_argument('--folder', required=True,
+                      help='Folder containing R function files')
     return parser.parse_args()
 
 def read_workflow_file(file_path):
@@ -237,7 +239,7 @@ jobs:
             print(f"Error deploying {func_name} to GitHub: {str(e)}")
             sys.exit(1)
 
-def deploy_to_aws(workflow_data):
+def deploy_to_aws(workflow_data, r_files_folder):
     # Get AWS credentials
     aws_access_key, aws_secret_key, aws_region = get_aws_credentials()
     
@@ -253,8 +255,8 @@ def deploy_to_aws(workflow_data):
     if not project_dir:
         project_dir = os.getcwd()
     
-    # Use project1 directory for R files
-    r_files_dir = os.path.join(project_dir, 'project1')
+    # Use the specified folder for R files
+    r_files_dir = os.path.join(project_dir, r_files_folder)
     
     # Process each function in the workflow
     for func_name, func_data in workflow_data['FunctionList'].items():
@@ -475,11 +477,18 @@ while (TRUE) {
                 
                 # Create or update Lambda function
                 try:
+                    # Get IAM role ARN from environment variable (GitHub secret)
+                    role_arn = os.getenv('AWS_LAMBDA_ROLE_ARN')
+                    if not role_arn:
+                        print("Error: AWS_LAMBDA_ROLE_ARN environment variable not set")
+                        print("Please set this as a GitHub secret with your Lambda execution role ARN")
+                        sys.exit(1)
+                    
                     lambda_client.create_function(
                         FunctionName=actual_func_name,
                         PackageType='Image',
                         Code={'ImageUri': image_uri},
-                        Role='arn:aws:iam::YOUR_ACCOUNT_ID:role/lambda-role',  # Replace with your role ARN
+                        Role=role_arn,
                         Timeout=300,
                         MemorySize=256
                     )
@@ -506,7 +515,7 @@ def main():
     if args.platform == 'github':
         deploy_to_github(workflow_data)
     elif args.platform == 'aws':
-        deploy_to_aws(workflow_data)
+        deploy_to_aws(workflow_data, args.folder)
 
 if __name__ == '__main__':
     main() 
