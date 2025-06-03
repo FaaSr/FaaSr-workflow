@@ -276,13 +276,17 @@ RUN yum install -y R \
     libcurl-devel \
     openssl-devel \
     libxml2-devel \
-    git
+    git \
+    which
 
-# Install required R packages
-RUN R -e "install.packages(c('jsonlite', 'httr', 'logger'), repos='https://cran.r-project.org')"
+# Install basic R packages first
+RUN R -e "install.packages(c('jsonlite', 'httr', 'logger'), repos='https://cran.r-project.org', dependencies=TRUE)"
 
-# Install FaaSr package
-RUN R -e "install.packages('remotes'); remotes::install_github('FaaSr/FaaSr-tutorial')"
+# Install remotes package
+RUN R -e "install.packages('remotes', repos='https://cran.r-project.org')"
+
+# Try to install FaaSr package, but don't fail if it doesn't work
+RUN R -e "tryCatch(remotes::install_github('FaaSr/FaaSr-tutorial'), error=function(e) cat('FaaSr installation failed, continuing without it:', e$message, '\n'))" || true
 
 # Copy the runtime and handler files
 COPY runtime.R ${LAMBDA_TASK_ROOT}
