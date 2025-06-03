@@ -66,14 +66,18 @@ def create_r_lambda_layer(lambda_client, layer_name, r_version="4.2.0"):
 # Install required packages
 RUN yum update -y && \
     yum groupinstall -y "Development Tools" && \
-    yum install -y wget tar gzip bzip2 xz-devel pcre-devel libcurl-devel openssl-devel
+    yum install -y wget tar gzip bzip2 xz-devel pcre-devel libcurl-devel openssl-devel \
+    readline-devel zlib-devel bzip2-devel xz-devel pcre-devel libcurl-devel \
+    openssl-devel texinfo texlive-* ghostscript java-1.8.0-openjdk-devel \
+    libXt-devel libX11-devel libpng-devel libjpeg-turbo-devel libtiff-devel \
+    cairo-devel pango-devel
 
 # Download and install R
 WORKDIR /tmp
 RUN wget https://cran.r-project.org/src/base/R-4/R-{r_version}.tar.gz && \
     tar xzf R-{r_version}.tar.gz && \
     cd R-{r_version} && \
-    ./configure --prefix=/opt/R --enable-R-shlib && \
+    ./configure --prefix=/opt/R --enable-R-shlib --with-x=no && \
     make && \
     make install
 
