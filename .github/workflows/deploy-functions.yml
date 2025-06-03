@@ -14,7 +14,7 @@ on:
         description: 'Workflow JSON file name'
         required: true
         type: string
-        default: 'tutorial_simple.json'
+        default: 'project1.json'
 
 jobs:
   deploy:
