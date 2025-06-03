@@ -286,7 +286,7 @@ RUN R -e "install.packages(c('jsonlite', 'httr', 'logger'), repos='https://cran.
 RUN R -e "install.packages('remotes', repos='https://cran.r-project.org')"
 
 # Try to install FaaSr package, but don't fail if it doesn't work
-RUN R -e "tryCatch(remotes::install_github('FaaSr/FaaSr-tutorial'), error=function(e) cat('FaaSr installation failed, continuing without it:', e$message, '\n'))" || true
+RUN R -e "try(remotes::install_github('FaaSr/FaaSr-tutorial'), silent=TRUE)"
 
 # Copy the runtime and handler files
 COPY runtime.R ${LAMBDA_TASK_ROOT}
