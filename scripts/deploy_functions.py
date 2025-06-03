@@ -52,7 +52,7 @@ def get_aws_credentials():
 
 def create_r_lambda_layer(lambda_client, layer_name):
     """
-    Create a Lambda layer with R runtime using the existing container
+    Create a Lambda layer with minimal R runtime and FaaSr package
     """
     # Create a temporary directory for building the layer
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -60,16 +60,47 @@ def create_r_lambda_layer(lambda_client, layer_name):
         layer_dir = os.path.join(temp_dir, "r")
         os.makedirs(layer_dir, exist_ok=True)
         
-        # Create Dockerfile to copy R from the existing container
-        dockerfile_content = """FROM ghcr.io/faasr/github-actions-tidyverse
+        # Create Dockerfile to build minimal R
+        dockerfile_content = """FROM r-base:4.3.2
+
+# Install jq for JSON parsing and git for package installation
+RUN apt-get update && apt-get install -y jq git
 
 # Create output directory
 RUN mkdir -p /output
 
-# Find R installation path and copy it
+# Install FaaSr package
+RUN R -e "install.packages('remotes'); remotes::install_github('FaaSr/FaaSr')"
+
+# Copy only essential R components
 RUN R_HOME=$(R RHOME) && \
-    cp -r $R_HOME /output/R && \
+    mkdir -p /output/R && \
+    cp -r $R_HOME/bin /output/R/ && \
+    cp -r $R_HOME/lib /output/R/ && \
+    cp -r $R_HOME/library /output/R/ && \
+    cp -r $R_HOME/modules /output/R/ && \
+    cp -r $R_HOME/etc /output/R/ && \
     chmod -R 755 /output/R
+
+# Copy jq to the output
+RUN cp $(which jq) /output/
+
+# Create bootstrap script
+RUN echo '#!/bin/bash' > /output/bootstrap && \
+    echo 'export R_HOME=/opt/r/R' >> /output/bootstrap && \
+    echo 'export PATH=$R_HOME/bin:$PATH' >> /output/bootstrap && \
+    echo 'export LD_LIBRARY_PATH=$R_HOME/lib:$LD_LIBRARY_PATH' >> /output/bootstrap && \
+    echo 'handle_event() {' >> /output/bootstrap && \
+    echo '    event=$(cat)' >> /output/bootstrap && \
+    echo '    folder=$(echo $event | jq -r ".folder")' >> /output/bootstrap && \
+    echo '    input1=$(echo $event | jq -r ".input1")' >> /output/bootstrap && \
+    echo '    input2=$(echo $event | jq -r ".input2")' >> /output/bootstrap && \
+    echo '    output=$(echo $event | jq -r ".output")' >> /output/bootstrap && \
+    echo '    $R_HOME/bin/Rscript /var/task/index.R "$folder" "$input1" "$input2" "$output"' >> /output/bootstrap && \
+    echo '    echo "{\\"statusCode\\": 200, \\"body\\": \\"Function executed successfully\\"}"' >> /output/bootstrap && \
+    echo '}' >> /output/bootstrap && \
+    echo 'handle_event' >> /output/bootstrap && \
+    chmod +x /output/bootstrap
 """
         
         with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
@@ -93,7 +124,7 @@ RUN R_HOME=$(R RHOME) && \
         # Extract R installation
         extract_result = subprocess.run(
             ["docker", "run", "--rm", "-v", f"{layer_dir}:/output", "r-builder", 
-             "bash", "-c", "R_HOME=$(R RHOME) && cp -r $R_HOME /output/"],
+             "bash", "-c", "cp -r /output/* /output/"],
             capture_output=True,
             text=True
         )
@@ -124,7 +155,7 @@ RUN R_HOME=$(R RHOME) && \
         with open(layer_zip, 'rb') as f:
             response = lambda_client.publish_layer_version(
                 LayerName=layer_name,
-                Description="R runtime for Lambda from tidyverse container",
+                Description="Minimal R runtime with FaaSr package for Lambda",
                 Content={'ZipFile': f.read()},
                 CompatibleRuntimes=['provided.al2']
             )
@@ -230,7 +261,27 @@ def deploy_to_aws(workflow_data):
                 
                 # Create bootstrap script
                 bootstrap_content = """#!/bin/bash
-/opt/r/bin/Rscript /var/task/index.R "$@"
+
+# Function to handle Lambda events
+handle_event() {
+    # Read the event from stdin
+    event=$(cat)
+    
+    # Extract arguments from the event
+    folder=$(echo $event | jq -r '.folder')
+    input1=$(echo $event | jq -r '.input1')
+    input2=$(echo $event | jq -r '.input2')
+    output=$(echo $event | jq -r '.output')
+    
+    # Run the R script with the extracted arguments
+    /opt/r/bin/Rscript /var/task/index.R "$folder" "$input1" "$input2" "$output"
+    
+    # Return success response
+    echo '{"statusCode": 200, "body": "Function executed successfully"}'
+}
+
+# Main execution
+handle_event
 """
                 with open(os.path.join(temp_dir, "bootstrap"), "w") as f:
                     f.write(bootstrap_content)
