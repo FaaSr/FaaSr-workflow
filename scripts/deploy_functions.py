@@ -248,13 +248,28 @@ def deploy_to_aws(workflow_data):
         region_name=aws_region
     )
     
-    # Process each function in the workflow
-    for func_name, func_data in workflow_data['FunctionList'].items():
-        try:
-            # Create a temporary directory for the function package
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Create Dockerfile
-                dockerfile_content = """FROM public.ecr.aws/lambda/r-base:4.3.2
+    # Create a temporary directory for cloning repositories
+    with tempfile.TemporaryDirectory() as repo_dir:
+        # Process each function in the workflow
+        for func_name, func_data in workflow_data['FunctionList'].items():
+            try:
+                # Get the actual function name and repository
+                actual_func_name = func_data['FunctionName']
+                repo_name = workflow_data['FunctionGitRepo'][actual_func_name]
+                
+                # Clone the repository if not already cloned
+                repo_path = os.path.join(repo_dir, actual_func_name)
+                if not os.path.exists(repo_path):
+                    print(f"Cloning repository {repo_name}...")
+                    subprocess.run(
+                        ["git", "clone", f"https://github.com/{repo_name}.git", repo_path],
+                        check=True
+                    )
+                
+                # Create a temporary directory for the function package
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    # Create Dockerfile
+                    dockerfile_content = """FROM public.ecr.aws/lambda/r-base:4.3.2
 
 # Install FaaSr package
 RUN R -e "install.packages('remotes'); remotes::install_github('FaaSr/FaaSr-tutorial')"
@@ -265,14 +280,15 @@ COPY index.R ${LAMBDA_TASK_ROOT}
 # Set the handler
 CMD [ "index.handler" ]
 """
-                with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
-                    f.write(dockerfile_content)
-                
-                # Copy R function
-                shutil.copy(f"functions/{func_name}.R", os.path.join(temp_dir, "index.R"))
-                
-                # Create handler wrapper
-                handler_content = """handler <- function(event) {
+                    with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
+                        f.write(dockerfile_content)
+                    
+                    # Copy R function from the cloned repository
+                    shutil.copy(os.path.join(repo_path, "functions", f"{actual_func_name}.R"), 
+                              os.path.join(temp_dir, "index.R"))
+                    
+                    # Create handler wrapper
+                    handler_content = """handler <- function(event) {
   # Extract arguments from the event
   folder <- event$folder
   input1 <- event$input1
@@ -290,74 +306,74 @@ CMD [ "index.handler" ]
   ))
 }
 """
-                with open(os.path.join(temp_dir, "handler.R"), "w") as f:
-                    f.write(handler_content)
-                
-                print(f"Building Docker image for {func_name}...")
-                # Build Docker image
-                build_result = subprocess.run(
-                    ["docker", "build", "-t", f"lambda-{func_name}", temp_dir],
-                    capture_output=True,
-                    text=True
-                )
-                
-                if build_result.returncode != 0:
-                    print("Docker build failed:")
-                    print(build_result.stdout)
-                    print(build_result.stderr)
-                    sys.exit(1)
-                
-                # Create ECR repository if it doesn't exist
-                ecr_client = boto3.client(
-                    'ecr',
-                    aws_access_key_id=aws_access_key,
-                    aws_secret_access_key=aws_secret_key,
-                    region_name=aws_region
-                )
-                
-                try:
-                    ecr_client.create_repository(repositoryName=func_name)
-                except ecr_client.exceptions.RepositoryAlreadyExistsException:
-                    pass
-                
-                # Get ECR login token and login
-                token = ecr_client.get_authorization_token()
-                username, password = base64.b64decode(token['authorizationData'][0]['authorizationToken']).decode().split(':')
-                registry = token['authorizationData'][0]['proxyEndpoint']
-                
-                subprocess.run(
-                    ["docker", "login", "-u", username, "-p", password, registry],
-                    capture_output=True,
-                    text=True
-                )
-                
-                # Tag and push image
-                image_uri = f"{registry.replace('https://', '')}/{func_name}:latest"
-                subprocess.run(["docker", "tag", f"lambda-{func_name}:latest", image_uri])
-                subprocess.run(["docker", "push", image_uri])
-                
-                # Create or update Lambda function
-                try:
-                    lambda_client.create_function(
-                        FunctionName=func_name,
-                        PackageType='Image',
-                        Code={'ImageUri': image_uri},
-                        Role='arn:aws:iam::YOUR_ACCOUNT_ID:role/lambda-role',  # Replace with your role ARN
-                        Timeout=300,
-                        MemorySize=256
+                    with open(os.path.join(temp_dir, "handler.R"), "w") as f:
+                        f.write(handler_content)
+                    
+                    print(f"Building Docker image for {actual_func_name}...")
+                    # Build Docker image
+                    build_result = subprocess.run(
+                        ["docker", "build", "-t", f"lambda-{actual_func_name}", temp_dir],
+                        capture_output=True,
+                        text=True
                     )
-                except lambda_client.exceptions.ResourceConflictException:
-                    # Update existing function
-                    lambda_client.update_function_code(
-                        FunctionName=func_name,
-                        ImageUri=image_uri
+                    
+                    if build_result.returncode != 0:
+                        print("Docker build failed:")
+                        print(build_result.stdout)
+                        print(build_result.stderr)
+                        sys.exit(1)
+                    
+                    # Create ECR repository if it doesn't exist
+                    ecr_client = boto3.client(
+                        'ecr',
+                        aws_access_key_id=aws_access_key,
+                        aws_secret_access_key=aws_secret_key,
+                        region_name=aws_region
                     )
-                
-                print(f"Successfully deployed {func_name} to AWS Lambda")
-                
-        except Exception as e:
-            print(f"Error deploying {func_name} to AWS: {str(e)}")
-            sys.exit(1)
+                    
+                    try:
+                        ecr_client.create_repository(repositoryName=actual_func_name)
+                    except ecr_client.exceptions.RepositoryAlreadyExistsException:
+                        pass
+                    
+                    # Get ECR login token and login
+                    token = ecr_client.get_authorization_token()
+                    username, password = base64.b64decode(token['authorizationData'][0]['authorizationToken']).decode().split(':')
+                    registry = token['authorizationData'][0]['proxyEndpoint']
+                    
+                    subprocess.run(
+                        ["docker", "login", "-u", username, "-p", password, registry],
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    # Tag and push image
+                    image_uri = f"{registry.replace('https://', '')}/{actual_func_name}:latest"
+                    subprocess.run(["docker", "tag", f"lambda-{actual_func_name}:latest", image_uri])
+                    subprocess.run(["docker", "push", image_uri])
+                    
+                    # Create or update Lambda function
+                    try:
+                        lambda_client.create_function(
+                            FunctionName=actual_func_name,
+                            PackageType='Image',
+                            Code={'ImageUri': image_uri},
+                            Role='arn:aws:iam::YOUR_ACCOUNT_ID:role/lambda-role',  # Replace with your role ARN
+                            Timeout=300,
+                            MemorySize=256
+                        )
+                    except lambda_client.exceptions.ResourceConflictException:
+                        # Update existing function
+                        lambda_client.update_function_code(
+                            FunctionName=actual_func_name,
+                            ImageUri=image_uri
+                        )
+                    
+                    print(f"Successfully deployed {actual_func_name} to AWS Lambda")
+                    
+            except Exception as e:
+                print(f"Error deploying {func_name} to AWS: {str(e)}")
+                sys.exit(1)
 
 def main():
     args = parse_arguments()
