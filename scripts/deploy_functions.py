@@ -267,25 +267,14 @@ def deploy_to_aws(workflow_data):
                 # Create Dockerfile
                 dockerfile_content = """FROM r-base:4.3.2
 
-# Install required packages
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install AWS Lambda Runtime Interface Client
-RUN pip3 install awslambdaric
-
 # Install FaaSr package
 RUN R -e "install.packages('remotes'); remotes::install_github('FaaSr/FaaSr-tutorial')"
 
 # Copy function code
-COPY index.R ${LAMBDA_TASK_ROOT}
-COPY handler.R ${LAMBDA_TASK_ROOT}
+COPY index.R /var/task/
 
 # Set the handler
-ENTRYPOINT [ "/usr/local/bin/python3", "-m", "awslambdaric" ]
-CMD [ "handler.handler" ]
+CMD [ "index.R" ]
 """
                 with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
                     f.write(dockerfile_content)
@@ -297,42 +286,6 @@ CMD [ "handler.handler" ]
                     sys.exit(1)
                     
                 shutil.copy(r_file_path, os.path.join(temp_dir, "index.R"))
-                
-                # Create handler wrapper
-                handler_content = """import json
-import subprocess
-import os
-
-def handler(event, context):
-    # Extract arguments from the event
-    folder = event.get('folder')
-    input1 = event.get('input1')
-    input2 = event.get('input2')
-    output = event.get('output')
-    
-    # Run the R script
-    result = subprocess.run([
-        'Rscript',
-        'index.R',
-        folder,
-        input1,
-        input2,
-        output
-    ], capture_output=True, text=True)
-    
-    if result.returncode != 0:
-        return {
-            'statusCode': 500,
-            'body': f'Error executing R script: {result.stderr}'
-        }
-    
-    return {
-        'statusCode': 200,
-        'body': 'Function executed successfully'
-    }
-"""
-                with open(os.path.join(temp_dir, "handler.py"), "w") as f:
-                    f.write(handler_content)
                 
                 print(f"Building Docker image for {actual_func_name}...")
                 # Build Docker image
