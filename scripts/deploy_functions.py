@@ -61,31 +61,80 @@ def create_r_lambda_layer(lambda_client, layer_name, r_version="4.2.0"):
         os.makedirs(layer_dir, exist_ok=True)
         
         # Create Dockerfile for building R
-        dockerfile_content = f"""
-        FROM amazonlinux:2
-        RUN yum update -y && yum install -y gcc gcc-c++ make wget tar
-        WORKDIR /tmp
-        RUN wget https://cran.r-project.org/src/base/R-4/R-{r_version}.tar.gz && \
-            tar xzf R-{r_version}.tar.gz && \
-            cd R-{r_version} && \
-            ./configure --prefix=/opt/R && \
-            make && make install
-        """
+        dockerfile_content = f"""FROM amazonlinux:2
+
+# Install required packages
+RUN yum update -y && \
+    yum groupinstall -y "Development Tools" && \
+    yum install -y wget tar gzip bzip2 xz-devel pcre-devel libcurl-devel openssl-devel
+
+# Download and install R
+WORKDIR /tmp
+RUN wget https://cran.r-project.org/src/base/R-4/R-{r_version}.tar.gz && \
+    tar xzf R-{r_version}.tar.gz && \
+    cd R-{r_version} && \
+    ./configure --prefix=/opt/R --enable-R-shlib && \
+    make && \
+    make install
+
+# Create output directory
+RUN mkdir -p /output
+
+# Copy R installation to output
+RUN cp -r /opt/R /output/
+
+# Set permissions
+RUN chmod -R 755 /output/R
+"""
         
         with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
             f.write(dockerfile_content)
         
+        print("Building R runtime Docker image...")
         # Build R in Docker
-        subprocess.run(["docker", "build", "-t", "r-builder", temp_dir])
+        build_result = subprocess.run(
+            ["docker", "build", "-t", "r-builder", temp_dir],
+            capture_output=True,
+            text=True
+        )
         
+        if build_result.returncode != 0:
+            print("Docker build failed:")
+            print(build_result.stdout)
+            print(build_result.stderr)
+            sys.exit(1)
+        
+        print("Extracting R installation...")
         # Extract R installation
-        subprocess.run(["docker", "run", "--rm", "-v", f"{layer_dir}:/output", "r-builder", 
-                       "cp", "-r", "/opt/R", "/output/"])
+        extract_result = subprocess.run(
+            ["docker", "run", "--rm", "-v", f"{layer_dir}:/output", "r-builder", 
+             "cp", "-r", "/opt/R", "/output/"],
+            capture_output=True,
+            text=True
+        )
         
+        if extract_result.returncode != 0:
+            print("Failed to extract R installation:")
+            print(extract_result.stdout)
+            print(extract_result.stderr)
+            sys.exit(1)
+        
+        # Verify the layer directory is not empty
+        if not os.listdir(layer_dir):
+            print("Error: Layer directory is empty after extraction")
+            sys.exit(1)
+        
+        print("Creating layer zip...")
         # Create layer zip
         layer_zip = os.path.join(temp_dir, "layer.zip")
         shutil.make_archive(layer_zip[:-4], 'zip', layer_dir)
         
+        # Verify the zip file exists and is not empty
+        if not os.path.exists(layer_zip) or os.path.getsize(layer_zip) == 0:
+            print("Error: Failed to create layer zip file")
+            sys.exit(1)
+        
+        print("Uploading layer to Lambda...")
         # Upload layer to Lambda
         with open(layer_zip, 'rb') as f:
             response = lambda_client.publish_layer_version(
