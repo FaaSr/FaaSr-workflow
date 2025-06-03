@@ -253,6 +253,9 @@ def deploy_to_aws(workflow_data):
     if not project_dir:
         project_dir = os.getcwd()
     
+    # Use project1 directory for R files
+    r_files_dir = os.path.join(project_dir, 'project1')
+    
     # Process each function in the workflow
     for func_name, func_data in workflow_data['FunctionList'].items():
         try:
@@ -276,8 +279,8 @@ CMD [ "index.handler" ]
                 with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
                     f.write(dockerfile_content)
                 
-                # Copy R function from project directory
-                r_file_path = os.path.join(project_dir, f"{actual_func_name}.R")
+                # Copy R function from project1 directory
+                r_file_path = os.path.join(r_files_dir, f"{actual_func_name}.R")
                 if not os.path.exists(r_file_path):
                     print(f"Error: R function file not found at {r_file_path}")
                     sys.exit(1)
