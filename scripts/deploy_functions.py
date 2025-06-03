@@ -267,9 +267,16 @@ def deploy_to_aws(workflow_data):
                 # Create Dockerfile using the cleaner approach from the Medium article
                 dockerfile_content = """FROM public.ecr.aws/lambda/provided:al2-x86_64
 
-# Install R
-RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-RUN yum install -y R
+# Install EPEL repository for Amazon Linux 2
+RUN yum install -y amazon-linux-extras
+RUN amazon-linux-extras install -y epel
+
+# Install R and required system dependencies
+RUN yum install -y R \
+    libcurl-devel \
+    openssl-devel \
+    libxml2-devel \
+    git
 
 # Install required R packages
 RUN R -e "install.packages(c('jsonlite', 'httr', 'logger'), repos='https://cran.r-project.org')"
