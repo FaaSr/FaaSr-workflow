@@ -248,6 +248,11 @@ def deploy_to_aws(workflow_data):
         region_name=aws_region
     )
     
+    # Get the project directory from the workflow file path
+    project_dir = os.path.dirname(os.path.abspath(workflow_data.get('_workflow_file', '')))
+    if not project_dir:
+        project_dir = os.getcwd()
+    
     # Process each function in the workflow
     for func_name, func_data in workflow_data['FunctionList'].items():
         try:
@@ -271,8 +276,13 @@ CMD [ "index.handler" ]
                 with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
                     f.write(dockerfile_content)
                 
-                # Copy R function from local directory
-                shutil.copy(f"{actual_func_name}.R", os.path.join(temp_dir, "index.R"))
+                # Copy R function from project directory
+                r_file_path = os.path.join(project_dir, f"{actual_func_name}.R")
+                if not os.path.exists(r_file_path):
+                    print(f"Error: R function file not found at {r_file_path}")
+                    sys.exit(1)
+                    
+                shutil.copy(r_file_path, os.path.join(temp_dir, "index.R"))
                 
                 # Create handler wrapper
                 handler_content = """handler <- function(event) {
@@ -365,6 +375,9 @@ CMD [ "index.handler" ]
 def main():
     args = parse_arguments()
     workflow_data = read_workflow_file(args.workflow_file)
+    
+    # Store the workflow file path in the workflow data
+    workflow_data['_workflow_file'] = args.workflow_file
     
     if args.platform == 'github':
         deploy_to_github(workflow_data)
