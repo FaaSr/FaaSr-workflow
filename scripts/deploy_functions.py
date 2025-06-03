@@ -50,9 +50,9 @@ def get_aws_credentials():
     
     return aws_access_key, aws_secret_key, aws_region
 
-def create_r_lambda_layer(lambda_client, layer_name, r_version="4.2.0"):
+def create_r_lambda_layer(lambda_client, layer_name):
     """
-    Create a Lambda layer with R runtime
+    Create a Lambda layer with R runtime using the existing container
     """
     # Create a temporary directory for building the layer
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -60,32 +60,14 @@ def create_r_lambda_layer(lambda_client, layer_name, r_version="4.2.0"):
         layer_dir = os.path.join(temp_dir, "r")
         os.makedirs(layer_dir, exist_ok=True)
         
-        # Create Dockerfile for building R
-        dockerfile_content = f"""FROM amazonlinux:2
-
-# Install required packages
-RUN yum update -y && \
-    yum groupinstall -y "Development Tools" && \
-    yum install -y wget tar gzip bzip2 xz-devel pcre-devel libcurl-devel openssl-devel \
-    readline-devel zlib-devel bzip2-devel xz-devel pcre-devel libcurl-devel \
-    openssl-devel texinfo texlive-* ghostscript java-1.8.0-openjdk-devel \
-    libXt-devel libX11-devel libpng-devel libjpeg-turbo-devel libtiff-devel \
-    cairo-devel pango-devel
-
-# Download and install R
-WORKDIR /tmp
-RUN wget https://cran.r-project.org/src/base/R-4/R-{r_version}.tar.gz && \
-    tar xzf R-{r_version}.tar.gz && \
-    cd R-{r_version} && \
-    ./configure --prefix=/opt/R --enable-R-shlib --with-x=no && \
-    make && \
-    make install
+        # Create Dockerfile to copy R from the existing container
+        dockerfile_content = """FROM ghcr.io/faasr/github-actions-tidyverse
 
 # Create output directory
 RUN mkdir -p /output
 
 # Copy R installation to output
-RUN cp -r /opt/R /output/
+RUN cp -r /usr/lib/R /output/R
 
 # Set permissions
 RUN chmod -R 755 /output/R
@@ -112,7 +94,7 @@ RUN chmod -R 755 /output/R
         # Extract R installation
         extract_result = subprocess.run(
             ["docker", "run", "--rm", "-v", f"{layer_dir}:/output", "r-builder", 
-             "cp", "-r", "/opt/R", "/output/"],
+             "cp", "-r", "/usr/lib/R", "/output/"],
             capture_output=True,
             text=True
         )
@@ -143,7 +125,7 @@ RUN chmod -R 755 /output/R
         with open(layer_zip, 'rb') as f:
             response = lambda_client.publish_layer_version(
                 LayerName=layer_name,
-                Description=f"R {r_version} runtime for Lambda",
+                Description="R runtime for Lambda from tidyverse container",
                 Content={'ZipFile': f.read()},
                 CompatibleRuntimes=['provided.al2']
             )
