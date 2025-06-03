@@ -264,28 +264,160 @@ def deploy_to_aws(workflow_data):
             
             # Create a temporary directory for the function package
             with tempfile.TemporaryDirectory() as temp_dir:
-                # Create Dockerfile
-                dockerfile_content = """FROM r-base:4.3.2
+                # Create Dockerfile using the cleaner approach from the Medium article
+                dockerfile_content = """FROM public.ecr.aws/lambda/provided:al2-x86_64
+
+# Install R
+RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+RUN yum install -y R
+
+# Install required R packages
+RUN R -e "install.packages(c('jsonlite', 'httr', 'logger'), repos='https://cran.r-project.org')"
 
 # Install FaaSr package
 RUN R -e "install.packages('remotes'); remotes::install_github('FaaSr/FaaSr-tutorial')"
 
-# Copy function code
-COPY index.R /var/task/
+# Copy the runtime and handler files
+COPY runtime.R ${LAMBDA_TASK_ROOT}
+COPY handler.R ${LAMBDA_TASK_ROOT}
 
 # Set the handler
-CMD [ "index.R" ]
+CMD [ "handler.main" ]
 """
                 with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
                     f.write(dockerfile_content)
                 
-                # Copy R function from project1 directory
+                # Copy R function from project1 directory and rename it to handler.R
                 r_file_path = os.path.join(r_files_dir, f"{actual_func_name}.R")
                 if not os.path.exists(r_file_path):
                     print(f"Error: R function file not found at {r_file_path}")
                     sys.exit(1)
-                    
-                shutil.copy(r_file_path, os.path.join(temp_dir, "index.R"))
+                
+                # Read the original R function to create a wrapper
+                with open(r_file_path, 'r') as f:
+                    original_r_code = f.read()
+                
+                # Create handler.R with wrapper that calls the original function
+                handler_content = f"""# Original FaaSr function
+{original_r_code}
+
+# Lambda handler wrapper
+main <- function(event) {{
+  tryCatch({{
+    # Extract parameters from the Lambda event
+    # The event should contain the function parameters as named elements
+    
+    # Call the original function with parameters from the event
+    if ("{actual_func_name}" == "create_sample_data") {{
+      folder <- event$folder
+      output1 <- event$output1  
+      output2 <- event$output2
+      
+      # Call the original function
+      result <- create_sample_data(folder, output1, output2)
+      
+    }} else if ("{actual_func_name}" == "compute_sum") {{
+      folder <- event$folder
+      input1 <- event$input1
+      input2 <- event$input2
+      output <- event$output
+      
+      # Call the original function
+      result <- compute_sum(folder, input1, input2, output)
+    }}
+    
+    # Return success response
+    return(list(
+      statusCode = 200,
+      body = list(
+        message = "Function executed successfully",
+        function_name = "{actual_func_name}"
+      )
+    ))
+    
+  }}, error = function(e) {{
+    # Return error response
+    return(list(
+      statusCode = 500,
+      body = list(
+        error = as.character(e),
+        function_name = "{actual_func_name}"
+      )
+    ))
+  }})
+}}
+"""
+                
+                with open(os.path.join(temp_dir, "handler.R"), "w") as f:
+                    f.write(handler_content)
+                
+                # Create runtime.R file that handles Lambda runtime interface
+                runtime_content = """# Lambda Runtime Interface for R
+# Based on approach from: https://medium.com/swlh/deploying-a-serverless-r-inference-service-using-aws-lambda-amazon-api-gateway-and-the-aws-cdk-65db916ea02c
+
+library(httr)
+library(jsonlite)
+library(logger)
+
+# Get environment variables
+lambda_runtime_api <- Sys.getenv("AWS_LAMBDA_RUNTIME_API")
+handler <- Sys.getenv("_HANDLER")
+
+# Parse handler
+handler_split <- strsplit(handler, ".", fixed = TRUE)[[1]]
+file_name <- paste0(handler_split[1], ".R")
+function_name <- handler_split[2]
+
+# Source the handler file
+source(file_name)
+
+# Main runtime loop
+while (TRUE) {
+  # Get next invocation
+  resp <- GET(
+    url = paste0("http://", lambda_runtime_api, "/2018-06-01/runtime/invocation/next"),
+    timeout(600)
+  )
+  
+  # Extract request ID and event data
+  request_id <- headers(resp)[["lambda-runtime-aws-request-id"]]
+  event_data <- content(resp, "text", encoding = "UTF-8")
+  
+  # Parse event data
+  event <- tryCatch({
+    fromJSON(event_data)
+  }, error = function(e) {
+    log_error("Failed to parse event data: {e$message}")
+    list()
+  })
+  
+  # Execute the handler function
+  result <- tryCatch({
+    # Call the function specified in the handler
+    if (exists(function_name)) {
+      do.call(function_name, list(event))
+    } else {
+      log_error("Function {function_name} not found")
+      list(statusCode = 500, body = paste("Function", function_name, "not found"))
+    }
+  }, error = function(e) {
+    log_error("Handler execution failed: {e$message}")
+    list(statusCode = 500, body = paste("Error:", e$message))
+  })
+  
+  # Convert result to JSON
+  response_json <- toJSON(result, auto_unbox = TRUE)
+  
+  # Send response
+  POST(
+    url = paste0("http://", lambda_runtime_api, "/2018-06-01/runtime/invocation/", request_id, "/response"),
+    body = response_json,
+    content_type("application/json")
+  )
+}
+"""
+                with open(os.path.join(temp_dir, "runtime.R"), "w") as f:
+                    f.write(runtime_content)
                 
                 print(f"Building Docker image for {actual_func_name}...")
                 # Build Docker image
