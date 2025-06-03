@@ -32,9 +32,9 @@ def read_workflow_file(file_path):
 
 def get_github_token():
     # Get GitHub PAT from environment variable
-    token = os.getenv('GITHUB_PAT')
+    token = os.getenv('PAT')
     if not token:
-        print("Error: GITHUB_PAT environment variable not set")
+        print("Error: PAT environment variable not set")
         sys.exit(1)
     return token
 
