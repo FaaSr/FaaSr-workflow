@@ -261,8 +261,9 @@ def deploy_to_aws(workflow_data, r_files_folder):
     # Process each function in the workflow
     for func_name, func_data in workflow_data['FunctionList'].items():
         try:
-            # Get the actual function name
+            # Get the actual function name and its arguments from the workflow
             actual_func_name = func_data['FunctionName']
+            function_args = func_data['Arguments']
             
             # Create a temporary directory for the function package
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -306,11 +307,10 @@ CMD [ "handler.main" ]
                     print(f"Error: R function file not found at {r_file_path}")
                     sys.exit(1)
                 
-                # Read the original R function to create a wrapper
                 with open(r_file_path, 'r') as f:
                     original_r_code = f.read()
-                
-                # Create handler.R with wrapper that calls the original function
+
+                # Dynamically generate the handler wrapper based on function arguments
                 handler_content = f"""# Original FaaSr function
 {original_r_code}
 
@@ -318,26 +318,12 @@ CMD [ "handler.main" ]
 main <- function(event) {{
   tryCatch({{
     # Extract parameters from the Lambda event
-    # The event should contain the function parameters as named elements
+    # Get all arguments from the event
+    args <- list()
+    {chr(10).join(f'    args${arg} <- event${arg}' for arg in function_args.keys())}
     
-    # Call the original function with parameters from the event
-    if ("{actual_func_name}" == "create_sample_data") {{
-      folder <- event$folder
-      output1 <- event$output1  
-      output2 <- event$output2
-      
-      # Call the original function
-      result <- create_sample_data(folder, output1, output2)
-      
-    }} else if ("{actual_func_name}" == "compute_sum") {{
-      folder <- event$folder
-      input1 <- event$input1
-      input2 <- event$input2
-      output <- event$output
-      
-      # Call the original function
-      result <- compute_sum(folder, input1, input2, output)
-    }}
+    # Call the original function with all arguments
+    result <- do.call({actual_func_name}, args)
     
     # Return success response
     return(list(
