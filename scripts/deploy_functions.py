@@ -72,7 +72,7 @@ RUN apt-get update && apt-get install -y jq git
 RUN mkdir -p /output
 
 # Install FaaSr package from the tutorial repository
-RUN R -e "install.packages('remotes'); remotes::install_github('FaaSr/FaaSr-tutorial')"
+RUN R -e "install.packages('remotes'); remotes::install_github('FaaSr/FaaSr-package', force=TRUE)"
 
 # Copy only essential R components
 RUN R_HOME=$(R RHOME) && \
