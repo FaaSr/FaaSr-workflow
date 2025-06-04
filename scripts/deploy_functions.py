@@ -52,116 +52,6 @@ def get_aws_credentials():
     
     return aws_access_key, aws_secret_key, aws_region
 
-def create_r_lambda_layer(lambda_client, layer_name):
-    """
-    Create a Lambda layer with minimal R runtime and FaaSr package
-    """
-    # Create a temporary directory for building the layer
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Create layer structure
-        layer_dir = os.path.join(temp_dir, "r")
-        os.makedirs(layer_dir, exist_ok=True)
-        
-        # Create Dockerfile to build minimal R
-        dockerfile_content = """FROM r-base:4.3.2
-
-# Install jq for JSON parsing and git for package installation
-RUN apt-get update && apt-get install -y jq git
-
-# Create output directory
-RUN mkdir -p /output
-
-# Install FaaSr package from the tutorial repository
-RUN R -e "install.packages('remotes'); remotes::install_github('FaaSr/FaaSr-package', force=TRUE)"
-
-# Copy only essential R components
-RUN R_HOME=$(R RHOME) && \
-    mkdir -p /output/R && \
-    cp -r $R_HOME/bin /output/R/ && \
-    cp -r $R_HOME/lib /output/R/ && \
-    cp -r $R_HOME/library /output/R/ && \
-    cp -r $R_HOME/modules /output/R/ && \
-    cp -r $R_HOME/etc /output/R/ && \
-    chmod -R 755 /output/R
-
-# Copy jq to the output
-RUN cp $(which jq) /output/
-
-# Create bootstrap script
-RUN echo '#!/bin/bash' > /output/bootstrap && \
-    echo 'export R_HOME=/opt/r/R' >> /output/bootstrap && \
-    echo 'export PATH=$R_HOME/bin:$PATH' >> /output/bootstrap && \
-    echo 'export LD_LIBRARY_PATH=$R_HOME/lib:$LD_LIBRARY_PATH' >> /output/bootstrap && \
-    echo 'handle_event() {' >> /output/bootstrap && \
-    echo '    event=$(cat)' >> /output/bootstrap && \
-    echo '    folder=$(echo $event | jq -r ".folder")' >> /output/bootstrap && \
-    echo '    input1=$(echo $event | jq -r ".input1")' >> /output/bootstrap && \
-    echo '    input2=$(echo $event | jq -r ".input2")' >> /output/bootstrap && \
-    echo '    output=$(echo $event | jq -r ".output")' >> /output/bootstrap && \
-    echo '    $R_HOME/bin/Rscript /var/task/index.R "$folder" "$input1" "$input2" "$output"' >> /output/bootstrap && \
-    echo '    echo "{\\"statusCode\\": 200, \\"body\\": \\"Function executed successfully\\"}"' >> /output/bootstrap && \
-    echo '}' >> /output/bootstrap && \
-    echo 'handle_event' >> /output/bootstrap && \
-    chmod +x /output/bootstrap
-"""
-        
-        with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
-            f.write(dockerfile_content)
-        
-        print("Building R runtime Docker image...")
-        # Build R in Docker
-        build_result = subprocess.run(
-            ["docker", "build", "-t", "r-builder", temp_dir],
-            capture_output=True,
-            text=True
-        )
-        
-        if build_result.returncode != 0:
-            print("Docker build failed:")
-            print(build_result.stdout)
-            print(build_result.stderr)
-            sys.exit(1)
-        
-        print("Extracting R installation...")
-        # Extract R installation
-        extract_result = subprocess.run(
-            ["docker", "run", "--rm", "-v", f"{layer_dir}:/output", "r-builder", 
-             "bash", "-c", "cp -r /output/* /output/"],
-            capture_output=True,
-            text=True
-        )
-        
-        if extract_result.returncode != 0:
-            print("Failed to extract R installation:")
-            print(extract_result.stdout)
-            print(extract_result.stderr)
-            sys.exit(1)
-        
-        # Verify the layer directory is not empty
-        if not os.listdir(layer_dir):
-            print("Error: Layer directory is empty after extraction")
-            sys.exit(1)
-        
-        print("Creating layer zip...")
-        # Create layer zip
-        layer_zip = os.path.join(temp_dir, "layer.zip")
-        shutil.make_archive(layer_zip[:-4], 'zip', layer_dir)
-        
-        # Verify the zip file exists and is not empty
-        if not os.path.exists(layer_zip) or os.path.getsize(layer_zip) == 0:
-            print("Error: Failed to create layer zip file")
-            sys.exit(1)
-        
-        print("Uploading layer to Lambda...")
-        # Upload layer to Lambda
-        with open(layer_zip, 'rb') as f:
-            response = lambda_client.publish_layer_version(
-                LayerName=layer_name,
-                Description="Minimal R runtime with FaaSr package for Lambda",
-                Content={'ZipFile': f.read()},
-                CompatibleRuntimes=['provided.al2']
-            )
-            return response['LayerVersionArn']
 
 def deploy_to_github(workflow_data):
     # Get GitHub token from environment variable
@@ -250,29 +140,14 @@ def deploy_to_aws(workflow_data, r_files_folder):
         region_name=aws_region
     )
     
-    # Create R runtime layer first
-    print("Creating R runtime layer...")
-    layer_arn = create_r_lambda_layer(lambda_client, "r-runtime")
-    print(f"R runtime layer created: {layer_arn}")
-    
-    # Get the project directory from the workflow file path
-    project_dir = os.path.dirname(os.path.abspath(workflow_data.get('_workflow_file', '')))
-    if not project_dir:
-        project_dir = os.getcwd()
-    
-    # Use the specified folder for R files
-    r_files_dir = os.path.join(project_dir, r_files_folder)
-    
     # Process each function in the workflow
     for func_name, func_data in workflow_data['FunctionList'].items():
         try:
-            # Get the actual function name and its arguments from the workflow
             actual_func_name = func_data['FunctionName']
-            function_args = func_data['Arguments']
             
             # Create a temporary directory for the function package
             with tempfile.TemporaryDirectory() as temp_dir:
-                # Create Dockerfile using the cleaner approach from the Medium article
+                # Create Dockerfile with R installation
                 dockerfile_content = """FROM public.ecr.aws/lambda/provided:al2-x86_64
 
 # Install EPEL repository for Amazon Linux 2
@@ -303,11 +178,12 @@ COPY handler.R ${LAMBDA_TASK_ROOT}
 # Set the handler
 CMD [ "handler.main" ]
 """
+                
                 with open(os.path.join(temp_dir, "Dockerfile"), "w") as f:
                     f.write(dockerfile_content)
                 
                 # Copy R function from project1 directory and rename it to handler.R
-                r_file_path = os.path.join(r_files_dir, f"{actual_func_name}.R")
+                r_file_path = os.path.join(r_files_folder, f"{actual_func_name}.R")
                 if not os.path.exists(r_file_path):
                     print(f"Error: R function file not found at {r_file_path}")
                     sys.exit(1)
@@ -325,7 +201,7 @@ main <- function(event) {{
     # Extract parameters from the Lambda event
     # Get all arguments from the event
     args <- list()
-    {chr(10).join(f'    args${arg} <- event${arg}' for arg in function_args.keys())}
+    {chr(10).join(f'    args${arg} <- event${arg}' for arg in func_data['Arguments'].keys())}
     
     # Call the original function with all arguments
     result <- do.call({actual_func_name}, args)
@@ -466,34 +342,21 @@ while (TRUE) {
                 subprocess.run(["docker", "tag", f"lambda-{actual_func_name}:latest", image_uri])
                 subprocess.run(["docker", "push", image_uri])
                 
-                # Create or update Lambda function
+                # Create or update Lambda function without layers
                 try:
-                    # Get IAM role ARN from environment variable (GitHub secret)
-                    role_arn = os.getenv('AWS_LAMBDA_ROLE_ARN')
-                    if not role_arn:
-                        print("Error: AWS_LAMBDA_ROLE_ARN environment variable not set")
-                        print("Please set this as a GitHub secret with your Lambda execution role ARN")
-                        sys.exit(1)
-                    
                     lambda_client.create_function(
                         FunctionName=actual_func_name,
                         PackageType='Image',
                         Code={'ImageUri': image_uri},
                         Role=role_arn,
                         Timeout=300,
-                        MemorySize=256,
-                        Layers=[layer_arn]
+                        MemorySize=256
                     )
                 except lambda_client.exceptions.ResourceConflictException:
                     # Update existing function
                     lambda_client.update_function_code(
                         FunctionName=actual_func_name,
                         ImageUri=image_uri
-                    )
-                    # Update layers
-                    lambda_client.update_function_configuration(
-                        FunctionName=actual_func_name,
-                        Layers=[layer_arn]
                     )
                 
                 print(f"Successfully deployed {actual_func_name} to AWS Lambda")
