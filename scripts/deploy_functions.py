@@ -250,6 +250,11 @@ def deploy_to_aws(workflow_data, r_files_folder):
         region_name=aws_region
     )
     
+    # Create R runtime layer first
+    print("Creating R runtime layer...")
+    layer_arn = create_r_lambda_layer(lambda_client, "r-runtime")
+    print(f"R runtime layer created: {layer_arn}")
+    
     # Get the project directory from the workflow file path
     project_dir = os.path.dirname(os.path.abspath(workflow_data.get('_workflow_file', '')))
     if not project_dir:
@@ -476,13 +481,19 @@ while (TRUE) {
                         Code={'ImageUri': image_uri},
                         Role=role_arn,
                         Timeout=300,
-                        MemorySize=256
+                        MemorySize=256,
+                        Layers=[layer_arn]
                     )
                 except lambda_client.exceptions.ResourceConflictException:
                     # Update existing function
                     lambda_client.update_function_code(
                         FunctionName=actual_func_name,
                         ImageUri=image_uri
+                    )
+                    # Update layers
+                    lambda_client.update_function_configuration(
+                        FunctionName=actual_func_name,
+                        Layers=[layer_arn]
                     )
                 
                 print(f"Successfully deployed {actual_func_name} to AWS Lambda")
