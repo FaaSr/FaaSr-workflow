@@ -15,8 +15,6 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Deploy FaaSr functions to specified platform')
     parser.add_argument('--workflow-file', required=True,
                       help='Path to the workflow JSON file')
-    parser.add_argument('--folder', required=True,
-                      help='Folder containing R function files')
     return parser.parse_args()
 
 def read_workflow_file(file_path):
