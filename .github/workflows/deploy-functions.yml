@@ -3,23 +3,11 @@ name: Deploy FaaSr Functions
 on:
   workflow_dispatch:
     inputs:
-      platform:
-        description: 'Deployment platform (aws/github)'
-        required: true
-        type: choice
-        options:
-          - aws
-          - github
       workflow_file:
         description: 'Workflow JSON file name'
         required: true
         type: string
         default: 'project1.json'
-      folder:
-        description: 'Folder containing R function files'
-        required: true
-        type: string
-        default: 'project1'
 
 jobs:
   deploy:
@@ -47,4 +35,4 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
           AWS_LAMBDA_ROLE_ARN: ${{ secrets.AWS_LAMBDA_ROLE_ARN }}
-        run: python scripts/deploy_functions.py --platform aws --workflow-file ${{ github.event.inputs.workflow_file }} --folder ${{ github.event.inputs.folder }}
+        run: python scripts/deploy_functions.py --workflow-file ${{ github.event.inputs.workflow_file }} 

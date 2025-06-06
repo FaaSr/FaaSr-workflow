@@ -13,8 +13,6 @@ import subprocess
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Deploy FaaSr functions to specified platform')
-    parser.add_argument('--platform', required=True, choices=['aws', 'github'],
-                      help='Platform to deploy functions to (aws/github)')
     parser.add_argument('--workflow-file', required=True,
                       help='Path to the workflow JSON file')
     parser.add_argument('--folder', required=True,
@@ -165,10 +163,16 @@ def main():
     # Store the workflow file path in the workflow data
     workflow_data['_workflow_file'] = args.workflow_file
     
-    if args.platform == 'github':
-        deploy_to_github(workflow_data)
-    elif args.platform == 'aws':
+    # Get FaaSType from workflow data
+    faas_type = workflow_data.get('FaaSType', '').lower()
+    
+    if faas_type == 'lambda':
         deploy_to_aws(workflow_data, args.folder)
+    elif faas_type == 'githubactions':
+        deploy_to_github(workflow_data)
+    else:
+        print(f"Error: Invalid FaaSType '{faas_type}' in workflow file. Must be 'Lambda' or 'GithubActions'")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main() 
