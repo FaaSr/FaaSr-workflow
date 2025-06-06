@@ -55,7 +55,8 @@ def deploy_to_github(workflow_data):
     g = Github(github_token)
     
     for func_name, func_data in workflow_data['FunctionList'].items():
-        repo_name = workflow_data['FunctionGitRepo'][func_name]
+        actual_func_name = func_data['FunctionName']
+        repo_name = workflow_data['FunctionGitRepo'][actual_func_name]
         try:
             repo = g.get_repo(repo_name)
             
@@ -69,7 +70,7 @@ def deploy_to_github(workflow_data):
             ])
             
             # Create workflow file
-            workflow_content = f"""name: {func_name}
+            workflow_content = f"""name: {actual_func_name}
 
 on:
   workflow_dispatch:
@@ -90,18 +91,18 @@ jobs:
             # Create or update the workflow file
             try:
                 repo.create_file(
-                    f".github/workflows/{func_name}.yml",
-                    f"Add workflow for {func_name}",
+                    f".github/workflows/{actual_func_name}.yml",
+                    f"Add workflow for {actual_func_name}",
                     workflow_content,
                     branch="main"
                 )
             except Exception as e:
                 if "already exists" in str(e):
                     # Update existing file
-                    contents = repo.get_contents(f".github/workflows/{func_name}.yml")
+                    contents = repo.get_contents(f".github/workflows/{actual_func_name}.yml")
                     repo.update_file(
                         contents.path,
-                        f"Update workflow for {func_name}",
+                        f"Update workflow for {actual_func_name}",
                         workflow_content,
                         contents.sha,
                         branch="main"
@@ -109,10 +110,10 @@ jobs:
                 else:
                     raise e
                     
-            print(f"Successfully deployed {func_name} to GitHub")
+            print(f"Successfully deployed {actual_func_name} to GitHub")
             
         except Exception as e:
-            print(f"Error deploying {func_name} to GitHub: {str(e)}")
+            print(f"Error deploying {actual_func_name} to GitHub: {str(e)}")
             sys.exit(1)
 
 def deploy_to_aws(workflow_data, r_files_folder):
