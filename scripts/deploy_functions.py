@@ -90,22 +90,25 @@ jobs:
 """
             
             # Create or update the workflow file
+            workflow_path = f".github/workflows/{actual_func_name}.yml"
             try:
-                repo.create_file(
-                    f".github/workflows/{actual_func_name}.yml",
-                    f"Add workflow for {actual_func_name}",
-                    workflow_content,
+                # Try to get the file first
+                contents = repo.get_contents(workflow_path)
+                # If file exists, update it
+                repo.update_file(
+                    path=workflow_path,
+                    message=f"Update workflow for {actual_func_name}",
+                    content=workflow_content,
+                    sha=contents.sha,
                     branch="main"
                 )
             except Exception as e:
-                if "already exists" in str(e):
-                    # Update existing file
-                    contents = repo.get_contents(f".github/workflows/{actual_func_name}.yml")
-                    repo.update_file(
-                        contents.path,
-                        f"Update workflow for {actual_func_name}",
-                        workflow_content,
-                        contents.sha,
+                if "Not Found" in str(e):
+                    # If file doesn't exist, create it
+                    repo.create_file(
+                        path=workflow_path,
+                        message=f"Add workflow for {actual_func_name}",
+                        content=workflow_content,
                         branch="main"
                     )
                 else:
