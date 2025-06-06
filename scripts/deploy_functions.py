@@ -60,12 +60,13 @@ def deploy_to_github(workflow_data):
         try:
             repo = g.get_repo(repo_name)
             
-            # Generate inputs based on function arguments
+            # Generate inputs based on function arguments with default values
             inputs_content = "\n".join([
                 f"      {arg}:\n"
                 f"        description: '{arg} parameter'\n"
                 f"        required: true\n"
-                f"        type: string"
+                f"        type: string\n"
+                f"        default: '{func_data['Arguments'][arg]}'"
                 for arg in func_data['Arguments'].keys()
             ])
             
