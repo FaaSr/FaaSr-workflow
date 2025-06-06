@@ -45,8 +45,8 @@
         "sum": "ghcr.io/faasr/github-actions-tidyverse"
     },
     "FunctionGitRepo": {
-        "create_sample_data": "FaaSr/FaaSr-tutorial",
-        "compute_sum": "FaaSr/FaaSr-tutorial"
+        "create_sample_data": "dekkov/FaaSr-tutorial-fork",
+        "compute_sum": "dekkov/FaaSr-tutorial-fork"
     },
     "FunctionInvoke": "start",
     "InvocationID": "",
