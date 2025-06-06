@@ -87,6 +87,10 @@ jobs:
         uses: actions/checkout@v3
         with:
           repository: {repo_name}
+      
+      - name: Run R function
+        run: |
+          Rscript {actual_func_name}.R {chr(10).join(f'${{{{ github.event.inputs.{arg} }}}}' for arg in func_data['Arguments'].keys())}
 """
             
             # Create or update the workflow file
