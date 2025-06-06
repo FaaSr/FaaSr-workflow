@@ -60,48 +60,41 @@ def deploy_to_github(workflow_data):
         try:
             repo = g.get_repo(repo_name)
             
-            # Generate inputs based on function arguments with default values
-            inputs_content = "\n".join([
-                f"      {arg}:\n"
-                f"        description: '{arg} parameter'\n"
-                f"        required: true\n"
-                f"        type: string\n"
-                f"        default: '{func_data['Arguments'][arg]}'"
-                for arg in func_data['Arguments'].keys()
-            ])
-            
             # Create workflow file
-            workflow_content = f"""name: {actual_func_name}
+            workflow_content = f"""name: Running Action- {func_name}
 
 on:
   workflow_dispatch:
     inputs:
-{inputs_content}
+      PAYLOAD:
+        description: 'Payload'
+        required: false
 
 jobs:
-  run-function:
+  run_docker_image:
     runs-on: ubuntu-latest
     container: {workflow_data['ActionContainers'][func_name]}
+    env:
+      SECRET_PAYLOAD: ${{{{ secrets.SECRET_PAYLOAD }}}}
+      GITHUB_PAT: ${{{{ secrets.GITHUB_TOKEN }}}}
+      PAYLOAD_REPO: ${{{{ vars.PAYLOAD_REPO }}}}
+      PAYLOAD: ${{{{ github.event.inputs.PAYLOAD }}}}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          repository: {repo_name}
-      
-      - name: Run R function
-        run: |
-          Rscript {actual_func_name}.R {chr(10).join(f'${{{{ github.event.inputs.{arg} }}}}' for arg in func_data['Arguments'].keys())}
+    - name: run Rscript
+      run: |
+        cd /action
+        Rscript faasr_{func_name}_invoke_github-actions.R
 """
             
             # Create or update the workflow file
-            workflow_path = f".github/workflows/{actual_func_name}.yml"
+            workflow_path = f".github/workflows/{func_name}.yml"
             try:
                 # Try to get the file first
                 contents = repo.get_contents(workflow_path)
                 # If file exists, update it
                 repo.update_file(
                     path=workflow_path,
-                    message=f"Update workflow for {actual_func_name}",
+                    message=f"Update workflow for {func_name}",
                     content=workflow_content,
                     sha=contents.sha,
                     branch="main"
@@ -111,17 +104,17 @@ jobs:
                     # If file doesn't exist, create it
                     repo.create_file(
                         path=workflow_path,
-                        message=f"Add workflow for {actual_func_name}",
+                        message=f"Add workflow for {func_name}",
                         content=workflow_content,
                         branch="main"
                     )
                 else:
                     raise e
                     
-            print(f"Successfully deployed {actual_func_name} to GitHub")
+            print(f"Successfully deployed {func_name} to GitHub")
             
         except Exception as e:
-            print(f"Error deploying {actual_func_name} to GitHub: {str(e)}")
+            print(f"Error deploying {func_name} to GitHub: {str(e)}")
             sys.exit(1)
 
 def deploy_to_aws(workflow_data, r_files_folder):
