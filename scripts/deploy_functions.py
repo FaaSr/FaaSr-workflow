@@ -162,7 +162,11 @@ def main():
     workflow_data['_workflow_file'] = args.workflow_file
     
     # Get FaaSType from workflow data
-    faas_type = workflow_data.get('FaaSType', '').lower()
+    faas_type = None
+    for server in workflow_data.get('ComputeServers', {}).values():
+        if 'FaaSType' in server:
+            faas_type = server['FaaSType'].lower()
+            break
     
     if faas_type == 'lambda':
         deploy_to_aws(workflow_data, args.folder)
