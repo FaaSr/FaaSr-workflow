@@ -84,7 +84,7 @@ def deploy_to_github(workflow_data):
             # Ensure required secrets and variables are set using environment variables
             required_secrets = {
                 "SECRET_PAYLOAD": os.getenv("SECRET_PAYLOAD", "dummy_secret_payload"),
-                "GITHUB_TOKEN": github_token
+                "PAT": github_token
             }
             required_vars = {
                 "PAYLOAD_REPO": os.getenv("PAYLOAD_REPO", "dummy_payload_repo")
@@ -128,7 +128,7 @@ jobs:
     container: {workflow_data['ActionContainers'][func_name]}
     env:
       SECRET_PAYLOAD: ${{{{ secrets.SECRET_PAYLOAD }}}}
-      GITHUB_PAT: ${{{{ secrets.GITHUB_TOKEN }}}}
+      GITHUB_PAT: ${{{{ secrets.PAT }}}}
       PAYLOAD_REPO: ${{{{ vars.PAYLOAD_REPO }}}}
       PAYLOAD: ${{{{ github.event.inputs.PAYLOAD }}}}
     steps:
