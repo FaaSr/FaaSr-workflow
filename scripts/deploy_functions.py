@@ -49,6 +49,27 @@ def get_aws_credentials():
     
     return aws_access_key, aws_secret_key, aws_region, role_arn
 
+def ensure_github_secrets_and_vars(repo, required_secrets, required_vars):
+    # Check and set secrets
+    existing_secrets = {s.name for s in repo.get_secrets()}
+    for secret_name, secret_value in required_secrets.items():
+        if secret_name not in existing_secrets:
+            print(f"Setting secret: {secret_name}")
+        else:
+            print(f"Secret {secret_name} already exists, updating it.")
+        repo.create_secret(secret_name, secret_value)
+
+    # Check and set variables
+    try:
+        existing_vars = {v.name for v in repo.get_all_repository_variables()}
+    except Exception:
+        existing_vars = set()
+    for var_name, var_value in required_vars.items():
+        if var_name not in existing_vars:
+            print(f"Setting variable: {var_name}")
+        else:
+            print(f"Variable {var_name} already exists, updating it.")
+        repo.create_repository_variable(var_name, var_value)
 
 def deploy_to_github(workflow_data):
     github_token = get_github_token()
@@ -60,15 +81,46 @@ def deploy_to_github(workflow_data):
         try:
             repo = g.get_repo(repo_name)
             
+            # Ensure required secrets and variables are set using environment variables
+            required_secrets = {
+                "SECRET_PAYLOAD": os.getenv("SECRET_PAYLOAD", "dummy_secret_payload"),
+                "GITHUB_TOKEN": github_token
+            }
+            required_vars = {
+                "PAYLOAD_REPO": os.getenv("PAYLOAD_REPO", "dummy_payload_repo")
+            }
+            ensure_github_secrets_and_vars(repo, required_secrets, required_vars)
+            
+            # First, create/update the workflow JSON file
+            workflow_json_path = f"workflows/{func_name}.json"
+            try:
+                # Try to get the file first
+                contents = repo.get_contents(workflow_json_path)
+                # If file exists, update it
+                repo.update_file(
+                    path=workflow_json_path,
+                    message=f"Update workflow JSON for {func_name}",
+                    content=json.dumps(workflow_data, indent=4),
+                    sha=contents.sha,
+                    branch="main"
+                )
+            except Exception as e:
+                if "Not Found" in str(e):
+                    # If file doesn't exist, create it
+                    repo.create_file(
+                        path=workflow_json_path,
+                        message=f"Add workflow JSON for {func_name}",
+                        content=json.dumps(workflow_data, indent=4),
+                        branch="main"
+                    )
+                else:
+                    raise e
+            
             # Create workflow file
             workflow_content = f"""name: Running Action- {func_name}
 
 on:
   workflow_dispatch:
-    inputs:
-      PAYLOAD:
-        description: 'Payload'
-        required: false
 
 jobs:
   run_docker_image:
@@ -111,10 +163,10 @@ jobs:
                 else:
                     raise e
                     
-            print(f"Successfully deployed {func_name} to GitHub")
+            print(f"Successfully deployed {actual_func_name} to GitHub")
             
         except Exception as e:
-            print(f"Error deploying {func_name} to GitHub: {str(e)}")
+            print(f"Error deploying {actual_func_name} to GitHub: {str(e)}")
             sys.exit(1)
 
 def deploy_to_aws(workflow_data, r_files_folder):
