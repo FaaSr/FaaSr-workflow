@@ -1,7 +1,7 @@
 {
     "ComputeServers": {
         "My_GitHub_Account": {
-            "FaaSType": "Lambda",
+            "FaaSType": "GithubActions",
             "UserName": "dekkov",
             "ActionRepoName": "FaaSr-CLI-test",
             "Branch": "main"

@@ -41,7 +41,7 @@ def get_aws_credentials():
     # Try to get AWS credentials from environment variables
     aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
     aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-    aws_region = os.getenv('AWS_DEFAULT_REGION', 'us-west-2')
+    aws_region = 'us-east-1'
     role_arn = os.getenv('AWS_LAMBDA_ROLE_ARN')
     
     if not all([aws_access_key, aws_secret_key, role_arn]):
