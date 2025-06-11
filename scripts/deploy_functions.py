@@ -92,11 +92,11 @@ def deploy_to_github(workflow_data):
             
             # Ensure required secrets and variables are set using environment variables
             required_secrets = {
-                "SECRET_PAYLOAD": os.getenv("SECRET_PAYLOAD", "dummy_secret_payload"),
+                "SECRET_PAYLOAD": github_token,
                 "PAT": github_token
             }
             required_vars = {
-                "PAYLOAD_REPO": os.getenv("PAYLOAD_REPO", "dummy_payload_repo")
+                "PAYLOAD_REPO": f"{repo_name}/payload.json"
             }
             ensure_github_secrets_and_vars(repo, required_secrets, required_vars, github_token)
             
@@ -125,12 +125,40 @@ def deploy_to_github(workflow_data):
                 else:
                     raise e
             
+            # Create/update the payload.json file at the root of the repository
+            payload_json_path = "payload.json"
+            try:
+                # Try to get the file first
+                contents = repo.get_contents(payload_json_path)
+                # If file exists, update it
+                repo.update_file(
+                    path=payload_json_path,
+                    message=f"Update payload.json for {func_name}",
+                    content=json.dumps(workflow_data, indent=4),
+                    sha=contents.sha,
+                    branch="main"
+                )
+            except Exception as e:
+                if "Not Found" in str(e):
+                    # If file doesn't exist, create it
+                    repo.create_file(
+                        path=payload_json_path,
+                        message=f"Add payload.json for {func_name}",
+                        content=json.dumps(workflow_data, indent=4),
+                        branch="main"
+                    )
+                else:
+                    raise e
+            
             # Create workflow file
             workflow_content = f"""name: Running Action- {func_name}
 
 on:
   workflow_dispatch:
-
+    inputs:
+      PAYLOAD:
+        description: 'Payload'
+        required: false
 jobs:
   run_docker_image:
     runs-on: ubuntu-latest
