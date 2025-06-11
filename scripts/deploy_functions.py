@@ -100,30 +100,6 @@ def deploy_to_github(workflow_data):
             }
             ensure_github_secrets_and_vars(repo, required_secrets, required_vars, github_token)
             
-            # First, create/update the workflow JSON file
-            workflow_json_path = f"workflows/{func_name}.json"
-            try:
-                # Try to get the file first
-                contents = repo.get_contents(workflow_json_path)
-                # If file exists, update it
-                repo.update_file(
-                    path=workflow_json_path,
-                    message=f"Update workflow JSON for {func_name}",
-                    content=json.dumps(workflow_data, indent=4),
-                    sha=contents.sha,
-                    branch="main"
-                )
-            except Exception as e:
-                if "Not Found" in str(e):
-                    # If file doesn't exist, create it
-                    repo.create_file(
-                        path=workflow_json_path,
-                        message=f"Add workflow JSON for {func_name}",
-                        content=json.dumps(workflow_data, indent=4),
-                        branch="main"
-                    )
-                else:
-                    raise e
             
             # Create/update the payload.json file at the root of the repository
             payload_json_path = "payload.json"
