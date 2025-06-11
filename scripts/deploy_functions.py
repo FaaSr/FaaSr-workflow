@@ -211,11 +211,11 @@ def deploy_to_aws(workflow_data):
             except lambda_client.exceptions.ResourceConflictException:
                 # Update existing function
                 lambda_client.update_function_code(
-                    FunctionName=actual_func_name,
+                    FunctionName=func_name,
                     ImageUri='992382457530.dkr.ecr.us-west-2.amazonaws.com/create_sample_data:latest'
                 )
             
-            print(f"Successfully deployed {actual_func_name} to AWS Lambda")
+            print(f"Successfully deployed {func_name} to AWS Lambda")
             
         except Exception as e:
             print(f"Error deploying {func_name} to AWS: {str(e)}")
