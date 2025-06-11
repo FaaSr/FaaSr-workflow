@@ -225,7 +225,7 @@ def deploy_to_aws(workflow_data):
             # Create or update Lambda function
             try:
                 lambda_client.create_function(
-                    FunctionName=actual_func_name,
+                    FunctionName=func_name,
                     PackageType='Image',
                     Code={'ImageUri': '992382457530.dkr.ecr.us-west-2.amazonaws.com/create_sample_data:latest'},
                     Role=role_arn,
