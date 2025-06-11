@@ -206,7 +206,7 @@ jobs:
             print(f"Error deploying {actual_func_name} to GitHub: {str(e)}")
             sys.exit(1)
 
-def deploy_to_aws(workflow_data, r_files_folder):
+def deploy_to_aws(workflow_data):
     # Get AWS credentials
     aws_access_key, aws_secret_key, aws_region, role_arn = get_aws_credentials()
     
@@ -260,7 +260,7 @@ def main():
             break
     
     if faas_type == 'lambda':
-        deploy_to_aws(workflow_data, args.folder)
+        deploy_to_aws(workflow_data)
     elif faas_type == 'githubactions':
         deploy_to_github(workflow_data)
     else:
