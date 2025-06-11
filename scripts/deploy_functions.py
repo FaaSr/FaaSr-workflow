@@ -10,6 +10,7 @@ import base64
 import tempfile
 import shutil
 import subprocess
+import requests
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Deploy FaaSr functions to specified platform')
@@ -49,7 +50,23 @@ def get_aws_credentials():
     
     return aws_access_key, aws_secret_key, aws_region, role_arn
 
-def ensure_github_secrets_and_vars(repo, required_secrets, required_vars):
+def set_github_variable(repo_full_name, var_name, var_value, github_token):
+    url = f"https://api.github.com/repos/{repo_full_name}/actions/variables/{var_name}"
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github+json"
+    }
+    data = {"name": var_name, "value": var_value}
+    # Try to update, if not found, create
+    r = requests.patch(url, headers=headers, json=data)
+    if r.status_code == 404:
+        r = requests.post(f"https://api.github.com/repos/{repo_full_name}/actions/variables", headers=headers, json=data)
+    if not r.ok:
+        print(f"Failed to set variable {var_name}: {r.text}")
+    else:
+        print(f"Set variable {var_name} for {repo_full_name}")
+
+def ensure_github_secrets_and_vars(repo, required_secrets, required_vars, github_token):
     # Check and set secrets
     existing_secrets = {s.name for s in repo.get_secrets()}
     for secret_name, secret_value in required_secrets.items():
@@ -59,17 +76,9 @@ def ensure_github_secrets_and_vars(repo, required_secrets, required_vars):
             print(f"Secret {secret_name} already exists, updating it.")
         repo.create_secret(secret_name, secret_value)
 
-    # Check and set variables
-    try:
-        existing_vars = {v.name for v in repo.get_all_repository_variables()}
-    except Exception:
-        existing_vars = set()
+    # Set variables using REST API
     for var_name, var_value in required_vars.items():
-        if var_name not in existing_vars:
-            print(f"Setting variable: {var_name}")
-        else:
-            print(f"Variable {var_name} already exists, updating it.")
-        repo.create_repository_variable(var_name, var_value)
+        set_github_variable(repo.full_name, var_name, var_value, github_token)
 
 def deploy_to_github(workflow_data):
     github_token = get_github_token()
@@ -89,7 +98,7 @@ def deploy_to_github(workflow_data):
             required_vars = {
                 "PAYLOAD_REPO": os.getenv("PAYLOAD_REPO", "dummy_payload_repo")
             }
-            ensure_github_secrets_and_vars(repo, required_secrets, required_vars)
+            ensure_github_secrets_and_vars(repo, required_secrets, required_vars, github_token)
             
             # First, create/update the workflow JSON file
             workflow_json_path = f"workflows/{func_name}.json"
