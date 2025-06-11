@@ -92,7 +92,7 @@ def deploy_to_github(workflow_data):
             
             # Ensure required secrets and variables are set using environment variables
             required_secrets = {
-                "SECRET_PAYLOAD": github_token,
+                "SECRET_PAYLOAD": json.dumps(github_token),
                 "PAT": github_token
             }
             required_vars = {
