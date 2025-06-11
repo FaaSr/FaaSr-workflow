@@ -90,11 +90,9 @@ def deploy_to_github(workflow_data):
         try:
             repo = g.get_repo(repo_name)
             
-            # Read faasr_env.txt file content for SECRET_PAYLOAD
-            with open('faasr_env.txt', 'r') as f:
-                faasr_env_content = f.read()
+            # Ensure required secrets and variables are set using environment variables
             required_secrets = {
-                "SECRET_PAYLOAD": faasr_env_content,
+                "SECRET_PAYLOAD": json.dumps(github_token),
                 "PAT": github_token
             }
             required_vars = {
