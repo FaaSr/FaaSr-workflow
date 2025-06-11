@@ -227,7 +227,7 @@ def deploy_to_aws(workflow_data):
                 lambda_client.create_function(
                     FunctionName=actual_func_name,
                     PackageType='Image',
-                    Code={'ImageUri': '992382457530.dkr.ecr.us-west-2.amazonaws.com/create_sample_data'},
+                    Code={'ImageUri': '992382457530.dkr.ecr.us-west-2.amazonaws.com/create_sample_data:latest'},
                     Role=role_arn,
                     Timeout=300,
                     MemorySize=256
@@ -236,7 +236,7 @@ def deploy_to_aws(workflow_data):
                 # Update existing function
                 lambda_client.update_function_code(
                     FunctionName=actual_func_name,
-                    ImageUri='992382457530.dkr.ecr.us-west-2.amazonaws.com/create_sample_data'
+                    ImageUri='992382457530.dkr.ecr.us-west-2.amazonaws.com/create_sample_data:latest'
                 )
             
             print(f"Successfully deployed {actual_func_name} to AWS Lambda")
