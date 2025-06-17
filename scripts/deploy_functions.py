@@ -207,6 +207,69 @@ def deploy_to_aws(workflow_data):
             print(f"Error deploying {prefixed_func_name} to AWS: {str(e)}")
             sys.exit(1)
 
+
+def get_openwhisk_credentials(workflow_data):
+    # Get OpenWhisk server configuration from workflow data
+    for server_name, server_config in workflow_data['ComputeServers'].items():
+        if server_config['FaaSType'].lower() == 'openwhisk':
+            return (
+                server_config['Endpoint'],
+                server_config['Namespace'],
+                server_config['SSL'].lower() == 'true'
+            )
+    
+    print("Error: No OpenWhisk server configuration found in workflow data")
+    sys.exit(1)
+
+def deploy_to_ow(workflow_data):
+    # Get OpenWhisk credentials
+    api_host, namespace, ssl = get_openwhisk_credentials()
+    
+    # Get the JSON file prefix
+    workflow_file = workflow_data['_workflow_file']
+    json_prefix = os.path.splitext(os.path.basename(workflow_file))[0]
+    
+    # Set up wsk properties
+    subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
+    subprocess.run(f"wsk property set --namespace {namespace}", shell=True)
+    if not ssl:
+        subprocess.run("wsk property set --insecure", shell=True)
+    
+    # Process each function in the workflow
+    for func_name, func_data in workflow_data['FunctionList'].items():
+        try:
+            actual_func_name = func_data['FunctionName']
+            # Create prefixed function name
+            prefixed_func_name = f"{json_prefix}_{func_name}"
+            
+            # Create or update OpenWhisk action using wsk CLI
+            try:
+                # First check if action exists
+                check_cmd = f"wsk action get {prefixed_func_name} >/dev/null 2>&1"
+                exists = subprocess.run(check_cmd, shell=True).returncode == 0
+                
+                if exists:
+                    # Update existing action
+                    cmd = f"wsk action update {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]}"
+                else:
+                    # Create new action
+                    cmd = f"wsk action create {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]}"
+                
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    raise Exception(f"Failed to {'update' if exists else 'create'} action: {result.stderr}")
+                
+                print(f"Successfully deployed {prefixed_func_name} to OpenWhisk")
+                
+            except Exception as e:
+                print(f"Error deploying {prefixed_func_name} to OpenWhisk: {str(e)}")
+                sys.exit(1)
+                
+        except Exception as e:
+            print(f"Error processing {func_name}: {str(e)}")
+            sys.exit(1)
+
 def main():
     args = parse_arguments()
     workflow_data = read_workflow_file(args.workflow_file)
@@ -225,6 +288,8 @@ def main():
         deploy_to_aws(workflow_data)
     elif faas_type == 'githubactions':
         deploy_to_github(workflow_data)
+    elif faas_type == 'openwhisk':
+        deploy_to_ow(workflow_data)
     else:
         print(f"Error: Invalid FaaSType '{faas_type}' in workflow file. Must be 'Lambda' or 'GithubActions'")
         sys.exit(1)
