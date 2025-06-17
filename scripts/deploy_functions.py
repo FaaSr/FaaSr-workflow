@@ -223,7 +223,7 @@ def get_openwhisk_credentials(workflow_data):
 
 def deploy_to_ow(workflow_data):
     # Get OpenWhisk credentials
-    api_host, namespace, ssl = get_openwhisk_credentials()
+    api_host, namespace, ssl = get_openwhisk_credentials(workflow_data)
     
     # Get the JSON file prefix
     workflow_file = workflow_data['_workflow_file']
