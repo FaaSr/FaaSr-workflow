@@ -166,6 +166,10 @@ def deploy_to_aws(workflow_data):
     # Get AWS credentials
     aws_access_key, aws_secret_key, aws_region, role_arn = get_aws_credentials()
     
+    # Get the JSON file prefix
+    workflow_file = workflow_data['_workflow_file']
+    json_prefix = os.path.splitext(os.path.basename(workflow_file))[0]
+    
     lambda_client = boto3.client(
         'lambda',
         aws_access_key_id=aws_access_key,
@@ -177,11 +181,13 @@ def deploy_to_aws(workflow_data):
     for func_name, func_data in workflow_data['FunctionList'].items():
         try:
             actual_func_name = func_data['FunctionName']
+            # Create prefixed function name
+            prefixed_func_name = f"{json_prefix}_{func_name}"
             
             # Create or update Lambda function
             try:
                 lambda_client.create_function(
-                    FunctionName=func_name,
+                    FunctionName=prefixed_func_name,
                     PackageType='Image',
                     Code={'ImageUri': '145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-tidyverse:latest'},
                     Role=role_arn,
@@ -191,14 +197,14 @@ def deploy_to_aws(workflow_data):
             except lambda_client.exceptions.ResourceConflictException:
                 # Update existing function
                 lambda_client.update_function_code(
-                    FunctionName=func_name,
+                    FunctionName=prefixed_func_name,
                     ImageUri='145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-tidyverse:latest'
                 )
             
-            print(f"Successfully deployed {func_name} to AWS Lambda")
+            print(f"Successfully deployed {prefixed_func_name} to AWS Lambda")
             
         except Exception as e:
-            print(f"Error deploying {func_name} to AWS: {str(e)}")
+            print(f"Error deploying {prefixed_func_name} to AWS: {str(e)}")
             sys.exit(1)
 
 def main():
