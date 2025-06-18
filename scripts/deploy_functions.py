@@ -249,16 +249,16 @@ def deploy_to_ow(workflow_data):
             
             # Create or update OpenWhisk action using wsk CLI
             try:
-                # First check if action exists
-                check_cmd = f"wsk action get {prefixed_func_name} >/dev/null 2>&1"
+                # First check if action exists (add --insecure flag)
+                check_cmd = f"wsk action get {prefixed_func_name} --insecure >/dev/null 2>&1"
                 exists = subprocess.run(check_cmd, shell=True, env=env).returncode == 0
                 
                 if exists:
-                    # Update existing action
-                    cmd = f"wsk action update {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]}"
+                    # Update existing action (add --insecure flag)
+                    cmd = f"wsk action update {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]} --insecure"
                 else:
-                    # Create new action
-                    cmd = f"wsk action create {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]}"
+                    # Create new action (add --insecure flag)
+                    cmd = f"wsk action create {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]} --insecure"
                 
                 result = subprocess.run(cmd, shell=True, capture_output=True, text=True, env=env)
                 
