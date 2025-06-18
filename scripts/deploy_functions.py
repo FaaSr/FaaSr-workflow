@@ -231,9 +231,14 @@ def deploy_to_ow(workflow_data):
     
     # Set up wsk properties
     subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
-    subprocess.run(f"wsk property set --namespace {namespace}", shell=True)
+    # Use the correct namespace flag
+    subprocess.run(f"wsk property set --auth {namespace}", shell=True)
     if not ssl:
         subprocess.run("wsk property set --insecure", shell=True)
+    
+    # Set environment variable to handle certificate issue
+    env = os.environ.copy()
+    env['GODEBUG'] = 'x509ignoreCN=0'
     
     # Process each function in the workflow
     for func_name, func_data in workflow_data['FunctionList'].items():
@@ -246,7 +251,7 @@ def deploy_to_ow(workflow_data):
             try:
                 # First check if action exists
                 check_cmd = f"wsk action get {prefixed_func_name} >/dev/null 2>&1"
-                exists = subprocess.run(check_cmd, shell=True).returncode == 0
+                exists = subprocess.run(check_cmd, shell=True, env=env).returncode == 0
                 
                 if exists:
                     # Update existing action
@@ -255,7 +260,7 @@ def deploy_to_ow(workflow_data):
                     # Create new action
                     cmd = f"wsk action create {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]}"
                 
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, env=env)
                 
                 if result.returncode != 0:
                     raise Exception(f"Failed to {'update' if exists else 'create'} action: {result.stderr}")
