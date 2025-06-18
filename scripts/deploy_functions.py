@@ -230,8 +230,13 @@ def deploy_to_ow(workflow_data):
     json_prefix = os.path.splitext(os.path.basename(workflow_file))[0]
     
     # Set up wsk properties
+    if not ssl:
+        # For non-SSL, use HTTP instead of HTTPS
+        api_host = api_host.replace('https://', 'http://')
+        if not api_host.startswith('http://'):
+            api_host = f"http://{api_host}"
+    
     subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
-    subprocess.run(f"wsk property set --namespace {namespace}", shell=True)
     if not ssl:
         subprocess.run("wsk property set --insecure", shell=True)
     
