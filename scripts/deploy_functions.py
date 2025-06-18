@@ -233,8 +233,8 @@ def deploy_to_ow(workflow_data):
     subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
     # Use the correct namespace flag
     subprocess.run(f"wsk property set --auth {namespace}", shell=True)
-    if not ssl:
-        subprocess.run("wsk property set --insecure", shell=True)
+    # Always use insecure flag to bypass certificate issues
+    subprocess.run("wsk property set --insecure", shell=True)
     
     # Set environment variable to handle certificate issue
     env = os.environ.copy()
