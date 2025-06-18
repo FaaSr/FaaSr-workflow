@@ -40,10 +40,11 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
           AWS_LAMBDA_ROLE_ARN: ${{ secrets.AWS_LAMBDA_ROLE_ARN }}
           PAT: ${{ secrets.PAT }}
-          # Add this to handle SSL certificate issues
           GODEBUG: "x509ignoreCN=0"
         run: |
           # Configure wsk with default guest auth
           wsk property set --auth 23bc46b1-71f6-4ed5-8c54-816aa4f8c502:123zO3xZCLrMN6v2BKK1dXYFpXlPkccOFqm12CdAsMgRU4VrNZ9lyGVCGuMDGIwP
+          # Set insecure flag for non-SSL connections
+          wsk property set --insecure
           # Run deployment
           python scripts/deploy_functions.py --workflow-file ${{ github.event.inputs.workflow_file }} 

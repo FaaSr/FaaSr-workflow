@@ -237,6 +237,11 @@ def deploy_to_ow(workflow_data):
     subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
     if not ssl:
         subprocess.run("wsk property set --insecure", shell=True)
+        print("SSL verification disabled")
+    
+    # Debug: Check current configuration
+    print("Current wsk configuration:")
+    subprocess.run("wsk property get --all", shell=True)
     
     # Process each function in the workflow
     for func_name, func_data in workflow_data['FunctionList'].items():
