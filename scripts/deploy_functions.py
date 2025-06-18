@@ -230,18 +230,10 @@ def deploy_to_ow(workflow_data):
     json_prefix = os.path.splitext(os.path.basename(workflow_file))[0]
     
     # Set up wsk properties
-    # Always use HTTPS, but disable SSL verification when SSL is False
-    if not api_host.startswith('https://'):
-        api_host = f"https://{api_host}"
-    
     subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
+    subprocess.run(f"wsk property set --namespace {namespace}", shell=True)
     if not ssl:
         subprocess.run("wsk property set --insecure", shell=True)
-        print("SSL verification disabled")
-    
-    # Debug: Check current configuration
-    print("Current wsk configuration:")
-    subprocess.run("wsk property get --all", shell=True)
     
     # Process each function in the workflow
     for func_name, func_data in workflow_data['FunctionList'].items():
