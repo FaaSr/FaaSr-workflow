@@ -231,14 +231,25 @@ def deploy_to_ow(workflow_data):
     
     # Set up wsk properties
     if not ssl:
-        # For non-SSL, use HTTP instead of HTTPS
-        api_host = api_host.replace('https://', 'http://')
-        if not api_host.startswith('http://'):
-            api_host = f"http://{api_host}"
-    
-    subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
-    if not ssl:
-        subprocess.run("wsk property set --insecure", shell=True)
+        # Try HTTP first, but fall back to HTTPS if needed
+        api_host_http = api_host.replace('https://', 'http://')
+        if not api_host_http.startswith('http://'):
+            api_host_http = f"http://{api_host_http}"
+        
+        # Test HTTP connection first
+        subprocess.run(f"wsk property set --apihost {api_host_http}", shell=True)
+        test_result = subprocess.run("wsk action list", shell=True, capture_output=True, text=True)
+        
+        if test_result.returncode != 0:
+            # If HTTP fails, try HTTPS
+            print("HTTP connection failed, trying HTTPS...")
+            api_host_https = api_host.replace('http://', 'https://')
+            if not api_host_https.startswith('https://'):
+                api_host_https = f"https://{api_host_https}"
+            subprocess.run(f"wsk property set --apihost {api_host_https}", shell=True)
+            subprocess.run("wsk property set --insecure", shell=True)
+    else:
+        subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
     
     # Process each function in the workflow
     for func_name, func_data in workflow_data['FunctionList'].items():
