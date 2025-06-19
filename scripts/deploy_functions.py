@@ -230,15 +230,15 @@ def deploy_to_ow(workflow_data):
     json_prefix = os.path.splitext(os.path.basename(workflow_file))[0]
     
     # Set up wsk properties
-    if not ssl:
-        # For non-SSL, use HTTP instead of HTTPS
-        api_host = api_host.replace('https://', 'http://')
-        if not api_host.startswith('http://'):
-            api_host = f"http://{api_host}"
-    
     subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
-    if not ssl:
-        subprocess.run("wsk property set --insecure", shell=True)
+    # Skip auth setting for OpenWhisk without authentication
+    print("Using OpenWhisk without authentication")
+    # Always use insecure flag to bypass certificate issues
+    subprocess.run("wsk property set --insecure", shell=True)
+    
+    # Set environment variable to handle certificate issue
+    env = os.environ.copy()
+    env['GODEBUG'] = 'x509ignoreCN=0'
     
     # Process each function in the workflow
     for func_name, func_data in workflow_data['FunctionList'].items():
@@ -249,18 +249,18 @@ def deploy_to_ow(workflow_data):
             
             # Create or update OpenWhisk action using wsk CLI
             try:
-                # First check if action exists
-                check_cmd = f"wsk action get {prefixed_func_name} >/dev/null 2>&1"
-                exists = subprocess.run(check_cmd, shell=True).returncode == 0
+                # First check if action exists (add --insecure flag)
+                check_cmd = f"wsk action get {prefixed_func_name} --insecure >/dev/null 2>&1"
+                exists = subprocess.run(check_cmd, shell=True, env=env).returncode == 0
                 
                 if exists:
-                    # Update existing action
-                    cmd = f"wsk action update {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]}"
+                    # Update existing action (add --insecure flag)
+                    cmd = f"wsk action update {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]} --insecure"
                 else:
-                    # Create new action
-                    cmd = f"wsk action create {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]}"
+                    # Create new action (add --insecure flag)
+                    cmd = f"wsk action create {prefixed_func_name} --docker {workflow_data['ActionContainers'][func_name]} --insecure"
                 
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, env=env)
                 
                 if result.returncode != 0:
                     raise Exception(f"Failed to {'update' if exists else 'create'} action: {result.stderr}")
