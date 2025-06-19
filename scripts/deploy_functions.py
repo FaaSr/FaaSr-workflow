@@ -94,6 +94,18 @@ def deploy_to_github(workflow_data):
         print("Error: GITHUB_REPOSITORY environment variable not set")
         sys.exit(1)
     
+    # Filter functions that should be deployed to GitHub Actions
+    github_functions = {}
+    for func_name, func_data in workflow_data['FunctionList'].items():
+        server_name = func_data['FaaSServer']
+        server_config = workflow_data['ComputeServers'][server_name]
+        if server_config['FaaSType'].lower() == 'githubactions':
+            github_functions[func_name] = func_data
+    
+    if not github_functions:
+        print("No functions found for GitHub Actions deployment")
+        return
+    
     try:
         repo = g.get_repo(repo_name)
         
@@ -104,7 +116,7 @@ def deploy_to_github(workflow_data):
         }
         ensure_github_secrets_and_vars(repo, required_secrets, {}, github_token)
         
-        for func_name, func_data in workflow_data['FunctionList'].items():
+        for func_name, func_data in github_functions.items():
             actual_func_name = func_data['FunctionName']
             
             # Create workflow file with prefixed name
@@ -177,8 +189,20 @@ def deploy_to_aws(workflow_data):
         region_name=aws_region
     )
     
-    # Process each function in the workflow
+    # Filter functions that should be deployed to AWS Lambda
+    lambda_functions = {}
     for func_name, func_data in workflow_data['FunctionList'].items():
+        server_name = func_data['FaaSServer']
+        server_config = workflow_data['ComputeServers'][server_name]
+        if server_config['FaaSType'].lower() == 'lambda':
+            lambda_functions[func_name] = func_data
+    
+    if not lambda_functions:
+        print("No functions found for AWS Lambda deployment")
+        return
+    
+    # Process each function in the workflow
+    for func_name, func_data in lambda_functions.items():
         try:
             actual_func_name = func_data['FunctionName']
             # Create prefixed function name
@@ -229,6 +253,18 @@ def deploy_to_ow(workflow_data):
     workflow_file = workflow_data['_workflow_file']
     json_prefix = os.path.splitext(os.path.basename(workflow_file))[0]
     
+    # Filter functions that should be deployed to OpenWhisk
+    ow_functions = {}
+    for func_name, func_data in workflow_data['FunctionList'].items():
+        server_name = func_data['FaaSServer']
+        server_config = workflow_data['ComputeServers'][server_name]
+        if server_config['FaaSType'].lower() == 'openwhisk':
+            ow_functions[func_name] = func_data
+    
+    if not ow_functions:
+        print("No functions found for OpenWhisk deployment")
+        return
+    
     # Set up wsk properties
     subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
     # Skip auth setting for OpenWhisk without authentication
@@ -241,7 +277,7 @@ def deploy_to_ow(workflow_data):
     env['GODEBUG'] = 'x509ignoreCN=0'
     
     # Process each function in the workflow
-    for func_name, func_data in workflow_data['FunctionList'].items():
+    for func_name, func_data in ow_functions.items():
         try:
             actual_func_name = func_data['FunctionName']
             # Create prefixed function name
@@ -282,22 +318,31 @@ def main():
     # Store the workflow file path in the workflow data
     workflow_data['_workflow_file'] = args.workflow_file
     
-    # Get FaaSType from workflow data
-    faas_type = None
+    # Get all unique FaaSTypes from workflow data
+    faas_types = set()
     for server in workflow_data.get('ComputeServers', {}).values():
         if 'FaaSType' in server:
-            faas_type = server['FaaSType'].lower()
-            break
+            faas_types.add(server['FaaSType'].lower())
     
-    if faas_type == 'lambda':
-        deploy_to_aws(workflow_data)
-    elif faas_type == 'githubactions':
-        deploy_to_github(workflow_data)
-    elif faas_type == 'openwhisk':
-        deploy_to_ow(workflow_data)
-    else:
-        print(f"Error: Invalid FaaSType '{faas_type}' in workflow file. Must be 'Lambda' or 'GithubActions'")
+    if not faas_types:
+        print("Error: No FaaSType found in workflow file")
         sys.exit(1)
+    
+    print(f"Found FaaS platforms: {', '.join(faas_types)}")
+    
+    # Deploy to each platform found
+    for faas_type in faas_types:
+        print(f"\nDeploying to {faas_type}...")
+        if faas_type == 'lambda':
+            deploy_to_aws(workflow_data)
+        elif faas_type == 'githubactions':
+            deploy_to_github(workflow_data)
+        elif faas_type == 'openwhisk':
+            deploy_to_ow(workflow_data)
+        else:
+            print(f"Warning: Unknown FaaSType '{faas_type}' - skipping")
+    
+    print("\nMulti-platform deployment completed!")
 
 if __name__ == '__main__':
     main() 
