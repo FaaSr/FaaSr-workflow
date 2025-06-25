@@ -109,6 +109,10 @@ def deploy_to_github(workflow_data):
     try:
         repo = g.get_repo(repo_name)
         
+        # Get the default branch name
+        default_branch = repo.default_branch
+        print(f"Using branch: {default_branch}")
+        
         # Ensure required secrets and variables are set using environment variables
         required_secrets = {
             "SECRET_PAYLOAD": json.dumps(github_token),
@@ -148,24 +152,40 @@ jobs:
             try:
                 # Try to get the file first
                 contents = repo.get_contents(workflow_path)
-                # If file exists, update it
-                repo.update_file(
-                    path=workflow_path,
-                    message=f"Update workflow for {json_prefix}_{func_name}",
-                    content=workflow_content,
-                    sha=contents.sha,
-                    branch="main"
-                )
+                existing_content = contents.decoded_content.decode('utf-8')
+                
+                # Check if content has changed
+                if existing_content.strip() == workflow_content.strip():
+                    print(f"File {workflow_path} content is already up to date, skipping update")
+                else:
+                    # If file exists and content is different, update it
+                    print(f"File {workflow_path} exists, updating...")
+                    repo.update_file(
+                        path=workflow_path,
+                        message=f"Update workflow for {json_prefix}_{func_name}",
+                        content=workflow_content,
+                        sha=contents.sha,
+                        branch=default_branch
+                    )
+                    print(f"Successfully updated {workflow_path}")
             except Exception as e:
-                if "Not Found" in str(e):
+                if "Not Found" in str(e) or "404" in str(e):
                     # If file doesn't exist, create it
+                    print(f"File {workflow_path} doesn't exist, creating...")
                     repo.create_file(
                         path=workflow_path,
                         message=f"Add workflow for {json_prefix}_{func_name}",
                         content=workflow_content,
-                        branch="main"
+                        branch=default_branch
                     )
+                    print(f"Successfully created {workflow_path}")
                 else:
+                    print(f"Error updating/creating {workflow_path}: {str(e)}")
+                    # Try to get more details about the error
+                    if hasattr(e, 'data'):
+                        print(f"Error details: {e.data}")
+                    if hasattr(e, 'status'):
+                        print(f"HTTP status: {e.status}")
                     raise e
                     
             print(f"Successfully deployed {actual_func_name} to GitHub")
