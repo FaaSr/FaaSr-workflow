@@ -3,7 +3,7 @@
         "My_GitHub_Account": {
             "FaaSType": "GithubActions",
             "UserName": "dekkov",
-            "ActionRepoName": "FaaSr-CLI",
+            "ActionRepoName": "FaaSr-cli",
             "Branch": "main"
         },
         "My_Lambda_Account": {
