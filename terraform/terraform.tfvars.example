@@ -1,0 +1,25 @@
+# Copy this file to terraform.tfvars and fill in your values
+
+# Path to your existing FaaSr JSON workflow file
+workflow_file_path = "../project1.json"
+
+# AWS Configuration
+aws_region = "us-east-1"
+aws_lambda_role_arn = "arn:aws:iam::YOUR_ACCOUNT:role/lambda-execution-role"
+
+# GitHub Configuration
+github_token = "ghp_your_github_personal_access_token_here"
+github_repository = "dekkov/FaaSr-cli"
+
+# Lambda Configuration (optional overrides)
+lambda_timeout = 300
+lambda_memory_size = 256
+
+# Environment and tags
+environment = "dev"
+tags = {
+  Project     = "FaaSr"
+  Environment = "dev"
+  ManagedBy   = "Terraform"
+  Owner       = "YourName"
+} 
