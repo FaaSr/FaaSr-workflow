@@ -21,8 +21,9 @@ resource "github_actions_secret" "pat" {
 }
 
 # Optional: Additional secrets that might be needed
+# Only create if additional_secrets is not empty
 resource "github_actions_secret" "additional_secrets" {
-  for_each = var.additional_secrets
+  for_each = length(var.additional_secrets) > 0 ? var.additional_secrets : {}
   
   repository      = var.repository_name
   secret_name     = each.key

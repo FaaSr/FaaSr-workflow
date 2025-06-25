@@ -72,8 +72,9 @@ module "github_secrets" {
   source = "./modules/github-secrets"
   count  = length(local.github_functions) > 0 ? 1 : 0
   
-  repository_name = var.github_repository
-  github_token    = var.github_token
+  repository_name     = var.github_repository
+  github_token        = var.github_token
+  additional_secrets  = {}  # Explicitly pass empty map
 }
 
 # Output information about deployed functions

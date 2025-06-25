@@ -13,5 +13,6 @@ variable "additional_secrets" {
   description = "Additional secrets to create in the repository"
   type        = map(string)
   default     = {}
-  sensitive   = true
+  # Note: Keys (secret names) are not sensitive, only values are
+  # This allows for_each to work properly
 } 
