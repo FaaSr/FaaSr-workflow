@@ -4,10 +4,6 @@ import json
 import os
 import sys
 
-# Add the project root to Python path to find local FaaSr_py
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-
 from FaaSr_py.engine.faasr_payload import FaaSrPayload
 from FaaSr_py.engine.scheduler import Scheduler
 
