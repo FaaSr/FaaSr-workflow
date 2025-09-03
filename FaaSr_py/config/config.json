@@ -1,0 +1,13 @@
+{
+    "SKIP_SCHEMA_VALIDATE": false,
+    "SKIP_WF_VALIDATE": false,
+    "SKIP_REAL_TRIGGERS": false,
+    "READABLE_LOGS": true,
+    "SKIP_USER_FUNCTION": false,
+    "USE_LOCAL_USER_FUNC": false,
+    "LOCAL_FUNCTION_PATH": "",
+    "LOCAL_FUNCTION_NAME": "",
+    "LOCAL_FUNC_ARGS": {},
+    "USE_LOCAL_FILE_SYSTEM": false,
+    "LOCAL_FILE_SYSTEM_DIR": ""
+}

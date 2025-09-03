@@ -4,23 +4,13 @@ import json
 import os
 import sys
 
-try:
-    from FaaSr_py.engine.faasr_payload import FaaSrPayload
-    from FaaSr_py.engine.scheduler import Scheduler
-except ImportError:
-    # Fallback to local scheduler if FaaSr_py package structure is different
-    try:
-        import sys
-        import os
-        # Add the project root to Python path to find local scheduler
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        sys.path.insert(0, project_root)
-        from scheduler.scheduler import Scheduler
-        from FaaSr_py.engine.faasr_payload import FaaSrPayload
-    except ImportError as e:
-        print(f"Error: Could not import required modules: {e}")
-        print("Make sure FaaSr-py is installed: pip install FaaSr-py")
-        sys.exit(1)
+# Add the project root to Python path to find local FaaSr_py
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
+from FaaSr_py.engine.faasr_payload import FaaSrPayload
+from FaaSr_py.engine.scheduler import Scheduler
+
 
 
 class FaaSrPayloadAdapter:
@@ -169,8 +159,11 @@ def migrate_invoke_workflow_to_scheduler(workflow_file_path, function_name=None)
         print(f"Error: FunctionInvoke '{function_invoke}' not found in ActionList")
         sys.exit(1)
     
-    # Create FaaSrPayload adapter
-    faasr_payload = FaaSrPayloadAdapter(workflow_data, workflow_file_path)
+    # Apply credential processing using adapter
+    adapter = FaaSrPayloadAdapter(workflow_data, workflow_file_path)
+    
+    # Create FaaSrPayload using the processed data
+    faasr_payload = FaaSrPayload(adapter.data)
     
     # Create scheduler instance
     scheduler = Scheduler(faasr_payload)
