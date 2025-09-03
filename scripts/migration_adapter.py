@@ -4,8 +4,29 @@ import json
 import os
 import sys
 
-from FaaSr_py.engine.faasr_payload import FaaSrPayload
-from FaaSr_py.engine.scheduler import Scheduler
+# Use local scheduler since pip package has syntax errors
+# Add the project root to Python path to find local scheduler
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
+from scheduler.scheduler import Scheduler
+
+# Create a minimal FaaSrPayload class that works with scheduler
+class FaaSrPayload:
+    def __init__(self, data):
+        self.data = data
+    
+    def __getitem__(self, key):
+        return self.data[key]
+    
+    def __setitem__(self, key, value):
+        self.data[key] = value
+    
+    def __contains__(self, key):
+        return key in self.data
+    
+    def get(self, key, default=None):
+        return self.data.get(key, default)
 
 
 
