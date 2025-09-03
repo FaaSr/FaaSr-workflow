@@ -46,7 +46,7 @@ def faasr_log(faasr_payload, log_message):
 
         log_download_path = (
             Path("./")
-            / f"{faasr_payload.log_file}-{str(faasr_payload["InvocationID"])}"
+            / f"{faasr_payload.log_file}-{str(faasr_payload['InvocationID'])}"
         )
         Path(log_download_path).parent.mkdir(parents=True, exist_ok=True)
 

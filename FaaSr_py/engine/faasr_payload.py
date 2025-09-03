@@ -59,9 +59,9 @@ class FaaSrPayload:
             raise ValueError("Payload validation error")
 
         if self.get("FunctionRank"):
-            self.log_file = f"{self["FunctionInvoke"]}({self["FunctionRank"]}).txt"
+            self.log_file = f"{self['FunctionInvoke']}({self['FunctionRank']}).txt"
         else:
-            self.log_file = f"{self["FunctionInvoke"]}.txt"
+            self.log_file = f"{self['FunctionInvoke']}.txt"
 
     def __getitem__(self, key):
         if key in self._overwritten:
@@ -259,7 +259,7 @@ class FaaSrPayload:
             # self["InvocationID"] = str(ID)
             self._generate_invocation_id()
 
-        faasr_msg = f"InvocationID for the workflow: {self["InvocationID"]}"
+        faasr_msg = f"InvocationID for the workflow: {self['InvocationID']}"
         logger.info(faasr_msg)
 
         if self["FaaSrLog"] is None or self["FaaSrLog"] == "":
@@ -272,7 +272,7 @@ class FaaSrPayload:
             log_folder.mkdir(parents=True, exist_ok=True)
             file_count = sum(1 for p in log_folder.iterdir() if p.is_file())
             if file_count != 0:
-                err_msg = f"InvocationID already exists: {self["InvocationID"]}"
+                err_msg = f"InvocationID already exists: {self['InvocationID']}"
                 logger.error(err_msg)
                 sys.exit(1)
         else:
@@ -290,7 +290,7 @@ class FaaSrPayload:
                 "Contents" in check_log_folder
                 and len(check_log_folder["Contents"]) != 0
             ):
-                err_msg = f"InvocationID already exists: {self["InvocationID"]}"
+                err_msg = f"InvocationID already exists: {self['InvocationID']}"
                 logger.error(err_msg)
                 sys.exit(1)
 

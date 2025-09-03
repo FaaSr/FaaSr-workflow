@@ -55,6 +55,6 @@ def default_func(test=32):
 
     # test get s3 creds
     s3_creds = faasr_get_s3_creds()  # noqa: F821
-    print(f"bucket: {s3_creds["bucket"]}")
+    print(f"bucket: {s3_creds['bucket']}")
     print(f"s3_creds: {s3_creds}")
     return True

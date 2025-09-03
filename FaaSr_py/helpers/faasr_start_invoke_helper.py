@@ -23,7 +23,7 @@ def faasr_get_github_clone(faasr_payload, url, base_dir=None):
         base_dir: directory to which GitHub repo should be cloned
     """
     if not base_dir:
-        base_dir = f"/tmp/functions/{faasr_payload["InvocationID"]}"
+        base_dir = f"/tmp/functions/{faasr_payload['InvocationID']}"
 
     pattern = r"([^/]+/[^/]+)\.git$"
     match = re.search(pattern, url)
