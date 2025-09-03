@@ -3,9 +3,26 @@
 import json
 import os
 import sys
-from scheduler.scheduler import Scheduler
 
-# Mock FaaSrPayload class for migration
+try:
+    from FaaSr_py.engine.faasr_payload import FaaSrPayload
+    from FaaSr_py.engine.scheduler import Scheduler
+except ImportError:
+    # Fallback to local scheduler if FaaSr_py package structure is different
+    try:
+        import sys
+        import os
+        # Add the project root to Python path to find local scheduler
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, project_root)
+        from scheduler.scheduler import Scheduler
+        from FaaSr_py.engine.faasr_payload import FaaSrPayload
+    except ImportError as e:
+        print(f"Error: Could not import required modules: {e}")
+        print("Make sure FaaSr-py is installed: pip install FaaSr-py")
+        sys.exit(1)
+
+
 class FaaSrPayloadAdapter:
     """
     Adapter class to bridge invoke_workflow.py data format to scheduler.py expectations
@@ -127,7 +144,7 @@ def migrate_invoke_workflow_to_scheduler(workflow_file_path, function_name=None)
         function_name: Optional function name to invoke (if None, uses FunctionInvoke from file)
     """
     
-    # Read workflow file (same as invoke_workflow.py)
+    # Read workflow file
     try:
         with open(workflow_file_path, 'r') as f:
             workflow_data = json.load(f)
