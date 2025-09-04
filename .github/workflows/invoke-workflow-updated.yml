@@ -56,4 +56,4 @@ jobs:
             MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
             GITHUB_TOKEN: ${{ secrets.PAT }}
         run: |
-          python scripts/migration_adapter.py --workflow-file ${{ github.event.inputs.workflow_file }} 
+          python scripts/invoke_workflow.py --workflow-file ${{ github.event.inputs.workflow_file }} 

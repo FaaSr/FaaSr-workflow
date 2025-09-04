@@ -51,4 +51,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PAT }}
         run: |
           # Run function registration 
-          python scripts/register_prefix_workflow.py --workflow-file ${{ github.event.inputs.workflow_file }} 
+          python scripts/register_workflow.py --workflow-file ${{ github.event.inputs.workflow_file }} 
