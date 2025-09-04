@@ -14,6 +14,7 @@ import requests
 import time
 import logging
 from collections import defaultdict
+import re
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -487,8 +488,17 @@ def deploy_to_aws(workflow_data):
             # Create prefixed function name using workflow_name-action_name format
             prefixed_func_name = f"{json_prefix}-{action_name}"
             
-            # Get container image, with fallback to default Lambda image
-            container_image = workflow_data.get('ActionContainers', {}).get(action_name, '145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-python:dev2145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-r:dev2')
+            # Get container image for AWS Lambda (must be an Amazon ECR image URI)
+            container_image = workflow_data.get('ActionContainers', {}).get(action_name)
+            if not container_image:
+                raise Exception(
+                    f"No container image configured for action '{action_name}'. "
+                )
+            # Validate it's an Amazon ECR URI: <account>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>
+            if not re.match(r"^[0-9]+\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/.+:.+$", container_image):
+                raise Exception(
+                    f"Invalid container image for AWS Lambda: '{container_image}'. "
+                )
             
             # Check payload size before deployment
             payload_size = len(secret_payload.encode('utf-8'))
