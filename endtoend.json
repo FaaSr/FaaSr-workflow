@@ -75,7 +75,7 @@
     "ActionContainers": {
         "r_func": "ghcr.io/faasr/ga-rpc-r:dev",
         "add_operation": "ghcr.io/faasr/ga-rpc-python:dev",
-        "delete": "ghcr.io/faasr/ga-rpc-python:dev",
+        "delete": "145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-python:dev2",
         "folders": "ghcr.io/faasr/ga-rpc-python:dev"
     },
     "FunctionCRANPackage": {

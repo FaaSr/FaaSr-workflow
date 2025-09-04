@@ -491,17 +491,9 @@ def deploy_to_aws(workflow_data):
             # Get container image for AWS Lambda (must be an Amazon ECR image URI)
             container_image = workflow_data.get('ActionContainers', {}).get(action_name)
             if not container_image:
-                raise Exception(
-                    f"No container image configured for action '{action_name}'. "
-                )
-            container_image = str(container_image).strip()
-            private_ecr = r"^[0-9]+\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com(?:\\.cn)?/.+:.+$"
-            public_ecr = r"^public\\.ecr\\.aws/.+:.+$"
-            if not (re.match(private_ecr, container_image) or re.match(public_ecr, container_image)):
-                raise Exception(
-                    f"Invalid container image for AWS Lambda: '{container_image}'. "
-                )
-            
+                container_image = '145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-tidyverse:latest'
+                print(f"No container specified for action '{action_name}', using default: {container_image}")
+ 
             # Check payload size before deployment
             payload_size = len(secret_payload.encode('utf-8'))
             if payload_size > 4000:  # Lambda env var limit is ~4KB
