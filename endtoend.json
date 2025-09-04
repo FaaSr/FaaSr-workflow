@@ -74,10 +74,10 @@
         }
     },
     "ActionContainers": {
-        "r_func": "ghcr.io/faasr/ga-rpc-r:dev",
-        "add_operation": "ghcr.io/faasr/ga-rpc-python:dev",
+        "r_func": "ghcr.io/faasr/github-actions-r:dev",
+        "add_operation": "ghcr.io/faasr/github-actions-python:dev",
         "delete": "145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-python:dev",
-        "folders": "ghcr.io/faasr/ga-rpc-python:dev"
+        "folders": "ghcr.io/faasr/github-actions-python:dev"
     },
     "FunctionCRANPackage": {
         "r_log": [
