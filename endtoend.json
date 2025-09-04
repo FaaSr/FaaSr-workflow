@@ -19,11 +19,12 @@
     "DataStores": {
         "My_Minio_Bucket": {
             "Bucket": "hoang",
+            "Endpoint": "https://play.min.io",
             "Region": "us-east-1",
             "Writable": "TRUE",
             "AccessKey": "My_Minio_Bucket_ACCESS_KEY",
             "SecretKey": "My_Minio_Bucket_SECRET_KEY"
-        }
+          }
     },
     "ActionList": {
         "add_operation": {
