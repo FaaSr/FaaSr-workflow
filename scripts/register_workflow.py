@@ -494,8 +494,10 @@ def deploy_to_aws(workflow_data):
                 raise Exception(
                     f"No container image configured for action '{action_name}'. "
                 )
-            # Validate it's an Amazon ECR URI: <account>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>
-            if not re.match(r"^[0-9]+\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/.+:.+$", container_image):
+            container_image = str(container_image).strip()
+            private_ecr = r"^[0-9]+\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com(?:\\.cn)?/.+:.+$"
+            public_ecr = r"^public\\.ecr\\.aws/.+:.+$"
+            if not (re.match(private_ecr, container_image) or re.match(public_ecr, container_image)):
                 raise Exception(
                     f"Invalid container image for AWS Lambda: '{container_image}'. "
                 )
