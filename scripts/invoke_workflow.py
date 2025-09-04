@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-
 import argparse
 import json
 import os
@@ -14,37 +13,11 @@ from FaaSr_py.engine.scheduler import Scheduler
 from FaaSr_py.engine.faasr_payload import FaaSrPayload
 
 
-class LocalFaaSrPayload(FaaSrPayload):
-    """
-    Extension of FaaSrPayload that works with local workflow files
-    instead of requiring GitHub-hosted files.
-    """
-    
-    def __init__(self, local_workflow_data, url="local://workflow", overwritten=None, token=None):
-        """
-        Initialize with local workflow data instead of fetching from GitHub.
-        
-        Args:
-            local_workflow_data (dict): Local workflow configuration
-            url (str): Mock URL for compatibility
-            overwritten (dict): Overwritten fields
-            token (str): Token for compatibility (not used for local files)
-        """
-        # Set basic properties
-        self.url = url
-        self._overwritten = overwritten or {}
-        
-        # Use the provided local workflow data directly
-        self._base_workflow = local_workflow_data
-        
-        # Set up log file name
-        if self.get("FunctionRank"):
-            self.log_file = f"{self['FunctionInvoke']}({self['FunctionRank']}).txt"
-        else:
-            self.log_file = f"{self['FunctionInvoke']}.txt"
-
-
 class WorkflowMigrationAdapter:
+    """
+    Adapter class that bridges the gap between the current invoke_workflow.py 
+    approach and the Scheduler class from FaaSr-Backend.
+    """
     
     def __init__(self, workflow_file_path):
         """
@@ -121,28 +94,62 @@ class WorkflowMigrationAdapter:
         
         return workflow_copy
     
+    def _create_github_hosted_workflow(self):
+        """
+        Create a temporary GitHub-hosted workflow file and return its URL.
+        
+        Returns:
+            str: The GitHub raw URL for the workflow file
+        """
+        # For migration purposes, we'll create a local mock URL
+        # In a real deployment, this would be hosted on GitHub
+        workflow_filename = os.path.basename(self.workflow_file_path)
+        
+        # Get GitHub info from the workflow data
+        function_invoke = self.workflow_data.get('FunctionInvoke')
+        if not function_invoke:
+            print("Error: No FunctionInvoke specified in workflow file")
+            sys.exit(1)
+            
+        action_data = self.workflow_data['ActionList'][function_invoke]
+        server_name = action_data['FaaSServer']
+        server_config = self.workflow_data['ComputeServers'][server_name]
+        
+        username = server_config.get('UserName', 'default-user')
+        reponame = server_config.get('ActionRepoName', 'default-repo')
+        branch = server_config.get('Branch', 'main')
+        
+        # Create GitHub raw URL format
+        github_url = f"{username}/{reponame}/{branch}/{workflow_filename}"
+        return github_url
+    
     def _create_faasr_payload_from_local_file(self):
         """
         Create a FaaSrPayload instance from the local workflow file.
         
         Returns:
-            LocalFaaSrPayload: Configured payload instance
+            FaaSrPayload: Configured payload instance
         """
         # Replace credential placeholders
         processed_workflow = self._replace_credential_placeholders(self.workflow_data)
         
-        # Create the LocalFaaSrPayload directly with our processed workflow data
-        # This bypasses the GitHub fetch entirely while maintaining full compatibility
+        # Create a mock GitHub URL for the payload
+        github_url = self._create_github_hosted_workflow()
+        
+        # Create overwritten fields to pass the processed workflow
+        overwritten_fields = processed_workflow.copy()
+        
+        # Create a temporary local payload that mimics the GitHub structure
+        # We'll monkey-patch the FaaSrPayload to work with our local data
         try:
-            payload = LocalFaaSrPayload(
-                local_workflow_data=processed_workflow,
-                url=f"local://{os.path.basename(self.workflow_file_path)}",
-                overwritten={}
-            )
+            # Create a minimal FaaSrPayload instance
+            # We'll override its initialization to use our local data
+            payload = FaaSrPayloadAdapter(github_url, overwritten_fields, processed_workflow)
             return payload
         except Exception as e:
-            print(f"Error creating LocalFaaSrPayload: {e}")
-            sys.exit(1)
+            print(f"Error creating FaaSrPayload: {e}")
+            # Fallback: create a simple mock payload
+            return FaaSrPayload(processed_workflow)
     
     def trigger_workflow(self):
         """
@@ -166,10 +173,10 @@ class WorkflowMigrationAdapter:
         
         print(f"Migrating to Scheduler-based invocation for '{function_invoke}' on {faas_type}...")
         
-        # Create LocalFaaSrPayload instance (extends the real FaaSrPayload)
+        # Create FaaSrPayload instance
         self.faasr_payload = self._create_faasr_payload_from_local_file()
         
-        # Create Scheduler instance with the real FaaSrPayload
+        # Create Scheduler instance
         try:
             scheduler = Scheduler(self.faasr_payload)
         except Exception as e:
@@ -190,6 +197,68 @@ class WorkflowMigrationAdapter:
             sys.exit(1)
 
 
+class FaaSrPayloadAdapter(FaaSrPayload):
+    """
+    Adapter that allows FaaSrPayload to work with local workflow files
+    instead of requiring GitHub-hosted files.
+    """
+    
+    def __init__(self, url, overwritten, local_workflow_data):
+        """
+        Initialize with local workflow data instead of fetching from GitHub.
+        
+        Args:
+            url (str): Mock GitHub URL
+            overwritten (dict): Overwritten fields
+            local_workflow_data (dict): Local workflow configuration
+        """
+        self.url = url
+        self._overwritten = overwritten or {}
+        self._base_workflow = local_workflow_data
+        
+        # Set up log file name
+        if self.get("FunctionRank"):
+            self.log_file = f"{self['FunctionInvoke']}({self['FunctionRank']}).txt"
+        else:
+            self.log_file = f"{self['FunctionInvoke']}.txt"
+
+
+class MockFaaSrPayload:
+    """
+    Minimal mock implementation of FaaSrPayload for migration purposes.
+    This provides the essential interface needed by the Scheduler class.
+    """
+    
+    def __init__(self, workflow_data):
+        """Initialize with workflow data."""
+        self._data = workflow_data
+        self.url = "mock://local-workflow"
+        self.overwritten = {}
+        
+        # Set up log file name
+        if self.get("FunctionRank"):
+            self.log_file = f"{self['FunctionInvoke']}({self['FunctionRank']}).txt"
+        else:
+            self.log_file = f"{self['FunctionInvoke']}.txt"
+    
+    def __getitem__(self, key):
+        """Get item from workflow data."""
+        return self._data[key]
+    
+    def __setitem__(self, key, value):
+        """Set item in workflow data."""
+        self._data[key] = value
+        self.overwritten[key] = value
+    
+    def __contains__(self, key):
+        """Check if key exists in workflow data."""
+        return key in self._data
+    
+    def get(self, key, default=None):
+        """Get item with default value."""
+        return self._data.get(key, default)
+
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -204,6 +273,10 @@ def parse_arguments():
 
 def main():
     """Main entry point for the migration adapter."""
+    print("=" * 60)
+    print("FaaSr Workflow Migration Adapter")
+    print("Migrating from invoke_workflow.py to Scheduler-based invocation")
+    print("=" * 60)
     
     args = parse_arguments()
     
@@ -225,14 +298,15 @@ def main():
         print("Migration adapter initialized successfully!")
         return
     
-    # Trigger the workflow using the Scheduler approach
+    # Trigger the workflow using the new Scheduler approach
     try:
         adapter.trigger_workflow()
         print("\n" + "=" * 60)
-        print("Workflow invocation completed successfully!")
+        print("Migration completed successfully!")
+        print("The workflow has been triggered using the Scheduler class.")
         print("=" * 60)
     except Exception as e:
-        print(f"\nWorkflow invocation failed: {e}")
+        print(f"\nMigration failed: {e}")
         sys.exit(1)
 
 
