@@ -15,6 +15,8 @@ import time
 import logging
 from collections import defaultdict
 import re
+from google.cloud import functions_v1
+from google.auth import default
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -229,6 +231,34 @@ def get_aws_credentials():
     
     return aws_access_key, aws_secret_key, aws_region, role_arn
 
+def get_gcp_credentials():
+    # Get GCP credentials from environment variables
+    project_id = os.getenv('GCP_PROJECT_ID')
+    service_account_key = os.getenv('GCP_SERVICE_ACCOUNT_KEY')
+    
+    if not project_id:
+        print("Error: GCP_PROJECT_ID environment variable not set")
+        sys.exit(1)
+    
+    if service_account_key:
+        # If service account key is provided, set it up
+        try:
+            # Write the service account key to a temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                f.write(service_account_key)
+                key_file = f.name
+            
+            # Set the environment variable for Google Cloud authentication
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = key_file
+            print("Using GCP service account key authentication")
+            return project_id, key_file
+        except Exception as e:
+            print(f"Error setting up GCP service account key: {str(e)}")
+            sys.exit(1)
+    else:
+        print("Using default GCP authentication (e.g., gcloud auth)")
+        return project_id, None
+
 def set_github_variable(repo_full_name, var_name, var_value, github_token):
     url = f"https://api.github.com/repos/{repo_full_name}/actions/variables/{var_name}"
     headers = {
@@ -274,6 +304,8 @@ def create_secret_payload(workflow_data):
         "My_OW_Account_API_KEY": os.getenv('OW_API_KEY', ''),
         "My_Lambda_Account_ACCESS_KEY": os.getenv('AWS_ACCESS_KEY_ID', ''),
         "My_Lambda_Account_SECRET_KEY": os.getenv('AWS_SECRET_ACCESS_KEY', ''),
+        "My_GCP_Account_PROJECT_ID": os.getenv('GCP_PROJECT_ID', ''),
+        "My_GCP_Account_SERVICE_ACCOUNT_KEY": os.getenv('GCP_SERVICE_ACCOUNT_KEY', ''),
     }
     
     payload = credentials.copy()
@@ -308,6 +340,14 @@ def create_secret_payload(workflow_data):
                 if 'API.key' in server_config and server_config['API.key'] == f"{server_key}_API_KEY":
                     if credentials['My_OW_Account_API_KEY']:
                         server_config['API.key'] = credentials['My_OW_Account_API_KEY']
+            elif faas_type == 'CloudFunctions':
+                # Replace GCP credentials placeholders
+                if 'ProjectID' in server_config and server_config['ProjectID'] == f"{server_key}_PROJECT_ID":
+                    if credentials['My_GCP_Account_PROJECT_ID']:
+                        server_config['ProjectID'] = credentials['My_GCP_Account_PROJECT_ID']
+                if 'ServiceAccountKey' in server_config and server_config['ServiceAccountKey'] == f"{server_key}_SERVICE_ACCOUNT_KEY":
+                    if credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']:
+                        server_config['ServiceAccountKey'] = credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']
 
     # Replace placeholder values in DataStores with actual credentials
     if 'DataStores' in payload:
@@ -709,6 +749,135 @@ def deploy_to_ow(workflow_data):
             print(f"Error processing {prefixed_func_name}: {str(e)}")
             sys.exit(1)
 
+def deploy_to_gcp(workflow_data):
+    """Deploy functions to Google Cloud Functions using container images."""
+    # Get GCP credentials
+    project_id, key_file = get_gcp_credentials()
+    
+    try:
+        # Initialize GCP client
+        functions_client = functions_v1.CloudFunctionsServiceClient()
+        
+        # Get the workflow name for function naming
+        workflow_name = workflow_data.get('WorkflowName', 'default')
+        json_prefix = workflow_name
+        
+        # Create secret payload (same as other deployments)
+        secret_payload = create_secret_payload(workflow_data)
+        
+        # Filter actions that should be deployed to GCP Cloud Functions
+        gcp_actions = {}
+        for action_name, action_data in workflow_data['ActionList'].items():
+            server_name = action_data['FaaSServer']
+            server_config = workflow_data['ComputeServers'][server_name]
+            faas_type = server_config['FaaSType'].lower()
+            if faas_type in ['cloudfunctions', 'cloud_functions', 'gcp', 'gcf']:
+                gcp_actions[action_name] = action_data
+        
+        if not gcp_actions:
+            print("No actions found for GCP Cloud Functions deployment")
+            return
+        
+        # Get GCP region from server config, default to us-central1
+        gcp_region = 'us-central1'
+        for server_config in workflow_data['ComputeServers'].values():
+            if server_config.get('FaaSType', '').lower() in ['cloudfunctions', 'cloud_functions', 'gcp', 'gcf']:
+                gcp_region = server_config.get('Region', 'us-central1')
+                break
+        
+        # Process each action in the workflow
+        for action_name, action_data in gcp_actions.items():
+            try:
+                actual_func_name = action_data['FunctionName']
+                
+                # Create prefixed function name using workflow_name-action_name format
+                prefixed_func_name = f"{json_prefix}-{action_name}".replace('_', '-').lower()
+                
+                # Get container image 
+                container_image = workflow_data.get('ActionContainers', {}).get(action_name)
+                if not container_image:
+                    container_image = 'gcr.io/faasr-project/gcp-cloud-functions-tidyverse:latest'
+                    print(f"No container specified for action '{action_name}', using default: {container_image}")
+                
+                # Prepare the Cloud Function paths
+                location_path = functions_client.common_location_path(project_id, gcp_region)
+                function_path = functions_client.cloud_function_path(project_id, gcp_region, prefixed_func_name)
+                
+                # Environment variables for the function
+                environment_vars = {
+                    'SECRET_PAYLOAD': secret_payload
+                }
+                
+                # Check payload size
+                payload_size = len(secret_payload.encode('utf-8'))
+                if payload_size > 32000:  # Cloud Functions env var limit is ~32KB
+                    print(f"Warning: SECRET_PAYLOAD size ({payload_size} bytes) may exceed Cloud Functions environment variable limits")
+                    print("Consider using Google Secret Manager for large payloads")
+                
+                # Define the Cloud Function with container image
+                function = {
+                    "name": function_path,
+                    "docker_repository": container_image,
+                    "timeout": "540s",
+                    "available_memory_mb": 1024,
+                    "environment_variables": environment_vars,
+                    "https_trigger": {},
+                }
+                
+                # Check if function already exists
+                try:
+                    existing_function = functions_client.get_function(name=function_path)
+                    print(f"Function {prefixed_func_name} already exists, updating...")
+                    
+                    # Update existing function
+                    update_mask = {"paths": ["docker_repository", "environment_variables", "timeout", "available_memory_mb"]}
+                    
+                    operation = functions_client.update_function(
+                        function=function,
+                        update_mask=update_mask
+                    )
+                    
+                    # Wait for the operation to complete
+                    print(f"Waiting for {prefixed_func_name} update to complete...")
+                    result = operation.result(timeout=300)  # 5 minute timeout
+                    print(f"Successfully updated {prefixed_func_name} on GCP Cloud Functions")
+                    
+                except Exception as e:
+                    if "not found" in str(e).lower() or "404" in str(e):
+                        # Function doesn't exist, create it
+                        print(f"Creating new Cloud Function: {prefixed_func_name}")
+                        
+                        operation = functions_client.create_function(
+                            parent=location_path,
+                            function=function
+                        )
+                        
+                        # Wait for the operation to complete
+                        print(f"Waiting for {prefixed_func_name} creation to complete...")
+                        result = operation.result(timeout=600)  # 10 minute timeout for creation
+                        print(f"Successfully created {prefixed_func_name} on GCP Cloud Functions")
+                    else:
+                        raise e
+                        
+            except Exception as e:
+                print(f"Error deploying {prefixed_func_name} to GCP: {str(e)}")
+                # Print additional debugging information
+                if "PERMISSION_DENIED" in str(e):
+                    print("Check GCP service account permissions for Cloud Functions")
+                elif "QUOTA_EXCEEDED" in str(e):
+                    print("Check GCP quotas for Cloud Functions in your project")
+                elif "INVALID_ARGUMENT" in str(e):
+                    print("Check function configuration parameters (name, region, container image)")
+                sys.exit(1)
+                
+    except Exception as e:
+        print(f"Error setting up GCP deployment: {str(e)}")
+        sys.exit(1)
+    finally:
+        # Clean up temporary key file if created
+        if key_file and os.path.exists(key_file):
+            os.unlink(key_file)
+
 def main():
     args = parse_arguments()
     workflow_data = read_workflow_file(args.workflow_file)
@@ -746,6 +915,8 @@ def main():
             deploy_to_github(workflow_data)
         elif faas_type in ['openwhisk', 'open_whisk', 'ow']:
             deploy_to_ow(workflow_data)
+        elif faas_type in ['cloudfunctions', 'cloud_functions', 'gcp', 'gcf']:
+            deploy_to_gcp(workflow_data)
         else:
             print(f"Warning: Unknown FaaSType '{faas_type}' - skipping")
     
