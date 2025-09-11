@@ -1,4 +1,4 @@
-name: (FAASR REGISTER)
+name: (FAASR REGISTER with new Secrets)
 
 on:
   workflow_dispatch:
@@ -42,21 +42,22 @@ jobs:
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
         with:
-          service_account_key: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SECRETKEY }}
+          project_id: ${{ vars.GCP_ProjectID }}
 
       - name: Register Functions
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-          AWS_LAMBDA_ROLE_ARN: ${{ secrets.AWS_LAMBDA_ROLE_ARN }}
-          OW_API_KEY: ${{ secrets.OW_API_KEY }}
-          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
-          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          GITHUB_TOKEN: ${{ secrets.PAT }}
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          AWS_ACCESSKEY: ${{ secrets.AWS_ACCESSKEY }}
+          AWS_SECRETKEY: ${{ secrets.AWS_SECRETKEY }}
+          AWS_ARN: ${{ secrets.AWS_ARN }}
+          OW_APIKEY: ${{ secrets.OW_APIKEY }}
+          MINIO_ACCESSKEY: ${{ secrets.MINIO_ACCESSKEY }}
+          MINIO_SECRETKEY: ${{ secrets.MINIO_SECRETKEY }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GCP_PROJECT_ID: ${{ vars.GCP_ProjectID }}
+          GCP_SECRETKEY: ${{ secrets.GCP_SECRETKEY }}
+          SLURM_TOKEN: ${{ secrets.SLURM_TOKEN }}
+          
         run: |
           # Run function registration 
           python scripts/register_workflow.py --workflow-file ${{ github.event.inputs.workflow_file }} 

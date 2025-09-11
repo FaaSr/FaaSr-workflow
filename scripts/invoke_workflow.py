@@ -45,12 +45,15 @@ class WorkflowMigrationAdapter:
     def _get_credentials(self):
         """Get credentials from environment variables."""
         return {
-            "My_GitHub_Account_TOKEN": os.getenv('GITHUB_TOKEN'),
-            "My_Minio_Bucket_ACCESS_KEY": os.getenv('MINIO_ACCESS_KEY'),
-            "My_Minio_Bucket_SECRET_KEY": os.getenv('MINIO_SECRET_KEY'),
-            "My_OW_Account_API_KEY": os.getenv('OW_API_KEY', ''),
-            "My_Lambda_Account_ACCESS_KEY": os.getenv('AWS_ACCESS_KEY_ID', ''),
-            "My_Lambda_Account_SECRET_KEY": os.getenv('AWS_SECRET_ACCESS_KEY', ''),
+            "My_GitHub_Account_TOKEN": os.getenv('GH_PAT'),
+            "My_Minio_Bucket_ACCESS_KEY": os.getenv('MINIO_ACCESSKEY'),
+            "My_Minio_Bucket_SECRET_KEY": os.getenv('MINIO_SECRETKEY'),
+            "My_OW_Account_API_KEY": os.getenv('OW_APIKEY', ''),
+            "My_Lambda_Account_ACCESS_KEY": os.getenv('AWS_ACCESSKEY', ''),
+            "My_Lambda_Account_SECRET_KEY": os.getenv('AWS_SECRETKEY', ''),
+            "My_GCP_Account_PROJECT_ID": os.getenv('GCP_PROJECT_ID', ''),
+            "My_GCP_Account_SERVICE_ACCOUNT_KEY": os.getenv('GCP_SECRETKEY', ''),
+            "My_SLURM_Account_TOKEN": os.getenv('SLURM_TOKEN', ''),
         }
     
     def _replace_credential_placeholders(self, workflow_data):
@@ -82,6 +85,11 @@ class WorkflowMigrationAdapter:
                 elif faas_type in ['openwhisk', 'open_whisk', 'ow']:
                     if credentials['My_OW_Account_API_KEY']:
                         server_config['API.key'] = credentials['My_OW_Account_API_KEY']
+                elif faas_type in ['cloudfunctions', 'cloud_functions', 'gcp', 'gcf']:
+                    if credentials['My_GCP_Account_PROJECT_ID']:
+                        server_config['ProjectID'] = credentials['My_GCP_Account_PROJECT_ID']
+                    if credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']:
+                        server_config['ServiceAccountKey'] = credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']
         
         # Replace placeholder values in DataStores with actual credentials
         if 'DataStores' in workflow_copy:

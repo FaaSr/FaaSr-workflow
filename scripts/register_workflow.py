@@ -212,29 +212,28 @@ def check_dag(faasr_payload):
 
 def get_github_token():
     # Get GitHub PAT from environment variable
-    token = os.getenv('GITHUB_TOKEN')
+    token = os.getenv('GH_PAT')
     if not token:
-        print("Error: GITHUB_TOKEN environment variable not set")
+        print("Error: GH_PAT environment variable not set")
         sys.exit(1)
     return token
 
 def get_aws_credentials():
     # Try to get AWS credentials from environment variables
-    aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
-    aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-    aws_region = 'us-east-1'
-    role_arn = os.getenv('AWS_LAMBDA_ROLE_ARN')
+    aws_access_key = os.getenv('AWS_ACCESSKEY')
+    aws_secret_key = os.getenv('AWS_SECRETKEY')
+    role_arn = os.getenv('AWS_ARN')
     
     if not all([aws_access_key, aws_secret_key, role_arn]):
         print("Error: AWS credentials or role ARN not set in environment variables")
         sys.exit(1)
     
-    return aws_access_key, aws_secret_key, aws_region, role_arn
+    return aws_access_key, aws_secret_key, role_arn
 
 def get_gcp_credentials():
     # Get GCP credentials from environment variables
     project_id = os.getenv('GCP_PROJECT_ID')
-    service_account_key = os.getenv('GCP_SERVICE_ACCOUNT_KEY')
+    service_account_key = os.getenv('GCP_SECRETKEY')
     
     if not project_id:
         print("Error: GCP_PROJECT_ID environment variable not set")
@@ -299,13 +298,14 @@ def create_secret_payload(workflow_data):
     # Start with credentials at the top
     credentials = {
         "My_GitHub_Account_TOKEN": get_github_token(),
-        "My_Minio_Bucket_ACCESS_KEY": os.getenv('MINIO_ACCESS_KEY'),
-        "My_Minio_Bucket_SECRET_KEY": os.getenv('MINIO_SECRET_KEY'),
-        "My_OW_Account_API_KEY": os.getenv('OW_API_KEY', ''),
-        "My_Lambda_Account_ACCESS_KEY": os.getenv('AWS_ACCESS_KEY_ID', ''),
-        "My_Lambda_Account_SECRET_KEY": os.getenv('AWS_SECRET_ACCESS_KEY', ''),
+        "My_Minio_Bucket_ACCESS_KEY": os.getenv('MINIO_ACCESSKEY'),
+        "My_Minio_Bucket_SECRET_KEY": os.getenv('MINIO_SECRETKEY'),
+        "My_OW_Account_API_KEY": os.getenv('OW_APIKEY', ''),
+        "My_Lambda_Account_ACCESS_KEY": os.getenv('AWS_ACCESSKEY', ''),
+        "My_Lambda_Account_SECRET_KEY": os.getenv('AWS_SECRETKEY', ''),
         "My_GCP_Account_PROJECT_ID": os.getenv('GCP_PROJECT_ID', ''),
-        "My_GCP_Account_SERVICE_ACCOUNT_KEY": os.getenv('GCP_SERVICE_ACCOUNT_KEY', ''),
+        "My_GCP_Account_SERVICE_ACCOUNT_KEY": os.getenv('GCP_SECRETKEY', ''),
+        "My_SLURM_Account_TOKEN": os.getenv('SLURM_TOKEN', ''),
     }
     
     payload = credentials.copy()
@@ -340,7 +340,7 @@ def create_secret_payload(workflow_data):
                 if 'API.key' in server_config and server_config['API.key'] == f"{server_key}_API_KEY":
                     if credentials['My_OW_Account_API_KEY']:
                         server_config['API.key'] = credentials['My_OW_Account_API_KEY']
-            elif faas_type == 'CloudFunctions':
+            elif faas_type in ['CloudFunctions', 'GoogleCloud']:
                 # Replace GCP credentials placeholders
                 if 'ProjectID' in server_config and server_config['ProjectID'] == f"{server_key}_PROJECT_ID":
                     if credentials['My_GCP_Account_PROJECT_ID']:
@@ -348,6 +348,10 @@ def create_secret_payload(workflow_data):
                 if 'ServiceAccountKey' in server_config and server_config['ServiceAccountKey'] == f"{server_key}_SERVICE_ACCOUNT_KEY":
                     if credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']:
                         server_config['ServiceAccountKey'] = credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']
+                # Handle SecretKey field as well (as seen in gcp.json)
+                if 'SecretKey' in server_config and server_config['SecretKey'] == f"{server_key}_SECRET_KEY":
+                    if credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']:
+                        server_config['SecretKey'] = credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']
 
     # Replace placeholder values in DataStores with actual credentials
     if 'DataStores' in payload:
@@ -431,7 +435,7 @@ jobs:
     runs-on: ubuntu-latest
     container: {container_image}
     env:
-      TOKEN: ${{{{ secrets.PAT }}}}
+      TOKEN: ${{{{ secrets.GH_PAT }}}}
       SECRET_PAYLOAD: ${{{{ secrets.SECRET_PAYLOAD }}}}
       OVERWRITTEN: ${{{{ github.event.inputs.OVERWRITTEN }}}}
       PAYLOAD_URL: ${{{{ github.event.inputs.PAYLOAD_URL }}}}
@@ -491,7 +495,15 @@ jobs:
 
 def deploy_to_aws(workflow_data):
     # Get AWS credentials
-    aws_access_key, aws_secret_key, aws_region, role_arn = get_aws_credentials()
+    aws_access_key, aws_secret_key, role_arn = get_aws_credentials()
+    
+    # Get AWS region from server config, default to us-east-1
+    aws_region = 'us-east-1'
+    for server_config in workflow_data['ComputeServers'].values():
+        faas_type = server_config.get('FaaSType', '').lower()
+        if faas_type in ['lambda', 'aws_lambda', 'aws']:
+            aws_region = server_config.get('Region', 'us-east-1')
+            break
     
     lambda_client = boto3.client(
         'lambda',
@@ -696,7 +708,7 @@ def deploy_to_ow(workflow_data):
     subprocess.run(f"wsk property set --apihost {api_host}", shell=True)
     
     # Set authentication using API key from environment variable
-    ow_api_key = os.getenv('OW_API_KEY')
+    ow_api_key = os.getenv('OW_APIKEY')
     if ow_api_key:
         subprocess.run(f"wsk property set --auth {ow_api_key}", shell=True)
         print("Using OpenWhisk with API key authentication")
@@ -767,23 +779,20 @@ def deploy_to_gcp(workflow_data):
         
         # Filter actions that should be deployed to GCP Cloud Functions
         gcp_actions = {}
+        gcp_region = 'us-central1'  # Default region
+        
         for action_name, action_data in workflow_data['ActionList'].items():
             server_name = action_data['FaaSServer']
             server_config = workflow_data['ComputeServers'][server_name]
             faas_type = server_config['FaaSType'].lower()
-            if faas_type in ['cloudfunctions', 'cloud_functions', 'gcp', 'gcf']:
+            if faas_type in ['cloudfunctions', 'cloud_functions', 'gcp', 'gcf', 'googlecloud']:
                 gcp_actions[action_name] = action_data
+                # Get the region from this server config
+                gcp_region = server_config.get('Region', 'us-central1')
         
         if not gcp_actions:
             print("No actions found for GCP Cloud Functions deployment")
             return
-        
-        # Get GCP region from server config, default to us-central1
-        gcp_region = 'us-central1'
-        for server_config in workflow_data['ComputeServers'].values():
-            if server_config.get('FaaSType', '').lower() in ['cloudfunctions', 'cloud_functions', 'gcp', 'gcf']:
-                gcp_region = server_config.get('Region', 'us-central1')
-                break
         
         # Process each action in the workflow
         for action_name, action_data in gcp_actions.items():
@@ -915,7 +924,7 @@ def main():
             deploy_to_github(workflow_data)
         elif faas_type in ['openwhisk', 'open_whisk', 'ow']:
             deploy_to_ow(workflow_data)
-        elif faas_type in ['cloudfunctions', 'cloud_functions', 'gcp', 'gcf']:
+        elif faas_type in ['cloudfunctions', 'cloud_functions', 'gcp', 'gcf', 'googlecloud']:
             deploy_to_gcp(workflow_data)
         else:
             print(f"Warning: Unknown FaaSType '{faas_type}' - skipping")
