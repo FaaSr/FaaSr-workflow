@@ -12,6 +12,13 @@ import shutil
 import subprocess
 import requests
 import time
+import logging
+from collections import defaultdict
+import re
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Deploy FaaSr functions to specified platform')
@@ -29,6 +36,177 @@ def read_workflow_file(file_path):
     except json.JSONDecodeError:
         print(f"Error: Invalid JSON in workflow file {file_path}")
         sys.exit(1)
+
+def extract_rank(str_input):
+    """
+    Returns action name and rank of an action with rank (e.g func(7) returns (func, 7))
+
+    Arguments:
+        str_input: function name with rank
+    Returns:
+        (str, int) -- action name and rank
+    """
+    parts = str_input.split("(")
+    if len(parts) != 2 or not parts[1].endswith(")"):
+        return str_input, 1
+    rank = int(parts[1][:-1])
+    action_name = parts[0]
+    return (action_name, rank)
+
+def is_cyclic(adj_graph, curr, visited, stack):
+    """
+    Recursive function that if there is a cycle in a directed
+    graph defined by an adjacency list
+
+    Arguments:
+        adj_graph: adjacency list for graph (dict)
+        curr: current node
+        visited: set of visited nodes (set)
+        stack: list of nodes in recursion call stack (list)
+
+    Returns:
+        bool: True if cycle exists, False otherwise
+    """
+    # if the current node is in the recursion call
+    # stack then there must be a cycle in the graph
+    if curr in stack:
+        return True
+
+    # add current node to recursion call stack and visited set
+    visited.add(curr)
+    stack.append(curr)
+
+    # check each successor for cycles, recursively calling is_cyclic()
+    for child in adj_graph[curr]:
+        if child not in visited and is_cyclic(adj_graph, child, visited, stack):
+            logger.error(f"Function loop found from node {curr} to {child}")
+            sys.exit(1)
+        elif child in stack:
+            logger.error(f"Function loop found from node {curr} to {child}")
+            sys.exit(1)
+
+    # no more successors to visit for this branch and no cycles found
+    # remove current node from recursion call stack
+    stack.pop()
+    return False
+
+def build_adjacency_graph(payload):
+    """
+    This function builds an adjacency list for the FaaSr workflow graph and determines
+    the ranks of each action
+
+    Arguments:
+        payload: FaaSr payload dict
+    Returns:
+        adj_graph: dict of predecessor: successor pairs
+        rank: dict of each action's rank
+    """
+    adj_graph = defaultdict(list)
+    ranks = dict()
+
+    # Build adjacency list from ActionList
+    for func in payload["ActionList"].keys():
+        invoke_next = payload["ActionList"][func]["InvokeNext"]
+        if isinstance(invoke_next, str):
+            invoke_next = [invoke_next]
+        for child in invoke_next:
+
+            def process_action(action):
+                action_name, action_rank = extract_rank(action)
+                if action_name in ranks and ranks[action_name] > 1:
+                    err_msg = "Function with rank cannot have multiple predecessors"
+                    logger.error(err_msg)
+                    sys.exit(1)
+                else:
+                    adj_graph[func].append(action_name)
+                    ranks[action_name] = action_rank
+
+            if isinstance(child, dict):
+                for conditional_branch in child.values():
+                    for action in conditional_branch:
+                        process_action(action)
+            else:
+                process_action(child)
+
+    for func in adj_graph:
+        if func not in ranks:
+            ranks[func] = 0
+
+    return (adj_graph, ranks)
+
+def predecessors_list(adj_graph):
+    """This function returns a map of action predecessor pairs
+
+    Arguments:
+        adj_graph: adjacency list for graph -- dict(function: successor)
+    """
+    pre = defaultdict(list)
+    for func1 in adj_graph:
+        for func2 in adj_graph[func1]:
+            pre[func2].append(func1)
+    return pre
+
+def check_dag(faasr_payload):
+    """
+    This method checks for cycles, repeated function names,
+    or unreachable nodes in the workflow and aborts if it finds any
+
+    Arguments:
+        payload: FaaSr payload dict
+    Returns:
+        predecessors: dict -- map of function predecessors
+    """
+    if faasr_payload["FunctionInvoke"] not in faasr_payload["ActionList"]:
+        err_msg = "FunctionInvoke does not refer to a valid function"
+        logger.error(err_msg)
+        sys.exit(1)
+
+    adj_graph, ranks = build_adjacency_graph(faasr_payload)
+
+    # Initialize empty recursion call stack
+    stack = []
+
+    # Initialize empty visited set
+    visited = set()
+
+    # Find initial function in the graph
+    start = False
+    for func in faasr_payload["ActionList"]:
+        if ranks[func] == 0:
+            start = True
+            # This function stores the first function with no predecessors
+            # In the cases where there is multiple functions with no
+            # predecessors, an unreachable state error will occur later
+            first_func = func
+            break
+
+    # Ensure there is an initial action
+    if start is False:
+        logger.error("Function loop found: no initial action")
+        sys.exit(1)
+
+    # Check for cycles
+    is_cyclic(adj_graph, first_func, visited, stack)
+
+    # Check if all of the functions have been visited by the DFS
+    # If not, then there is an unreachable state in the graph
+    for func in faasr_payload["ActionList"]:
+        if func.split(".")[0] not in visited:
+            logger.error(f"Unreachable state found: {func}")
+            sys.exit(1)
+
+    # Initialize predecessor list
+    pre = predecessors_list(adj_graph)
+
+    curr_pre = pre[faasr_payload["FunctionInvoke"]]
+    real_pre = []
+    for p in curr_pre:
+        if p in ranks and ranks[p] > 1:
+            for i in range(1, ranks[p] + 1):
+                real_pre.append(f"{p}.{i}")
+        else:
+            real_pre.append(p)
+    return real_pre
 
 def get_github_token():
     # Get GitHub PAT from environment variable
@@ -149,9 +327,9 @@ def deploy_to_github(workflow_data):
     github_token = get_github_token()
     g = Github(github_token)
     
-    # Get the current repository name from the workflow file path
-    workflow_file = workflow_data['_workflow_file']
-    json_prefix = os.path.splitext(os.path.basename(workflow_file))[0]
+    # Get the workflow name for prefixing
+    workflow_name = workflow_data.get('WorkflowName', 'default')
+    json_prefix = workflow_name
     
     # Get the current repository
     repo_name = os.getenv('GITHUB_REPOSITORY')
@@ -159,16 +337,17 @@ def deploy_to_github(workflow_data):
         print("Error: GITHUB_REPOSITORY environment variable not set")
         sys.exit(1)
     
-    # Filter functions that should be deployed to GitHub Actions
-    github_functions = {}
-    for func_name, func_data in workflow_data['FunctionList'].items():
-        server_name = func_data['FaaSServer']
+    # Filter actions that should be deployed to GitHub Actions
+    github_actions = {}
+    for action_name, action_data in workflow_data['ActionList'].items():
+        server_name = action_data['FaaSServer']
         server_config = workflow_data['ComputeServers'][server_name]
-        if server_config['FaaSType'].lower() == 'githubactions':
-            github_functions[func_name] = func_data
+        faas_type = server_config['FaaSType'].lower()
+        if faas_type in ['githubactions', 'github_actions', 'github']:
+            github_actions[action_name] = action_data
     
-    if not github_functions:
-        print("No functions found for GitHub Actions deployment")
+    if not github_actions:
+        print("No actions found for GitHub Actions deployment")
         return
     
     try:
@@ -181,41 +360,50 @@ def deploy_to_github(workflow_data):
         # Create secret payload and set up secrets/variables
         secret_payload = create_secret_payload(workflow_data)
         required_secrets = {"SECRET_PAYLOAD": secret_payload}
-        vars = {f"{json_prefix}_PAYLOAD_REPO": f"{repo_name}/{json_prefix}.json"}
+        vars = {f"{json_prefix.upper()}_PAYLOAD_REPO": f"{repo_name}/{workflow_data['_workflow_file']}"}
         
         ensure_github_secrets_and_vars(repo, required_secrets, vars, github_token)
         
-        # Deploy each function
-        for func_name, func_data in github_functions.items():
-            actual_func_name = func_data['FunctionName']
+        # Deploy each action
+        for action_name, action_data in github_actions.items():
+            actual_func_name = action_data['FunctionName']
+            
+            # Create prefixed action name using workflow_name-action_name format
+            prefixed_action_name = f"{json_prefix}-{action_name}"
             
             # Create workflow file
-            workflow_content = f"""name: {func_name}
+            # Get container image, with fallback to default
+            container_image = workflow_data.get('ActionContainers', {}).get(action_name, 'ghcr.io/faasr/github-actions-tidyverse')
+            
+            workflow_content = f"""name: {prefixed_action_name}
 
 on:
   workflow_dispatch:
     inputs:
-      PAYLOAD:
-        description: 'Payload'
-        required: false
+      OVERWRITTEN:
+        description: 'overwritten fields'
+        required: true
+      PAYLOAD_URL:
+        description: 'url to payload'
+        required: true
 jobs:
   run_docker_image:
     runs-on: ubuntu-latest
-    container: {workflow_data['ActionContainers'][func_name]}
+    container: {container_image}
     env:
+      TOKEN: ${{{{ secrets.PAT }}}}
       SECRET_PAYLOAD: ${{{{ secrets.SECRET_PAYLOAD }}}}
-      GITHUB_PAT: ${{{{ secrets.PAT }}}}
-      PAYLOAD_REPO: ${{{{ vars.{json_prefix.upper()}_PAYLOAD_REPO }}}}
-      PAYLOAD: ${{{{ github.event.inputs.PAYLOAD }}}}
+      OVERWRITTEN: ${{{{ github.event.inputs.OVERWRITTEN }}}}
+      PAYLOAD_URL: ${{{{ github.event.inputs.PAYLOAD_URL }}}}
     steps:
-    - name: run Rscript
+    - name: run Python
       run: |
         cd /action
-        Rscript faasr_start_invoke_github-actions.R
+        python3 faasr_entry.py
 """
             
             # Create or update the workflow file
-            workflow_path = f".github/workflows/{func_name}.yml"
+            workflow_path = f".github/workflows/{prefixed_action_name}.yml"
             try:
                 # Try to get the file first
                 contents = repo.get_contents(workflow_path)
@@ -229,7 +417,7 @@ jobs:
                     print(f"File {workflow_path} exists, updating...")
                     repo.update_file(
                         path=workflow_path,
-                        message=f"Update workflow for {func_name}",
+                        message=f"Update workflow for {prefixed_action_name}",
                         content=workflow_content,
                         sha=contents.sha,
                         branch=default_branch
@@ -241,7 +429,7 @@ jobs:
                     print(f"File {workflow_path} doesn't exist, creating...")
                     repo.create_file(
                         path=workflow_path,
-                        message=f"Add workflow for {func_name}",
+                        message=f"Add workflow for {prefixed_action_name}",
                         content=workflow_content,
                         branch=default_branch
                     )
@@ -255,7 +443,7 @@ jobs:
                         print(f"HTTP status: {e.status}")
                     raise e
                     
-            print(f"Successfully deployed {actual_func_name} to GitHub")
+            print(f"Successfully deployed {prefixed_action_name} to GitHub")
             
     except Exception as e:
         print(f"Error deploying to GitHub: {str(e)}")
@@ -272,26 +460,40 @@ def deploy_to_aws(workflow_data):
         region_name=aws_region
     )
     
+    # Get the workflow name for function naming
+    workflow_name = workflow_data.get('WorkflowName', 'default')
+    json_prefix = workflow_name
+    
     # Create secret payload (same as GitHub deployment)
     secret_payload = create_secret_payload(workflow_data)
     
-    # Filter functions that should be deployed to AWS Lambda
-    lambda_functions = {}
-    for func_name, func_data in workflow_data['FunctionList'].items():
-        server_name = func_data['FaaSServer']
+    # Filter actions that should be deployed to AWS Lambda
+    lambda_actions = {}
+    for action_name, action_data in workflow_data['ActionList'].items():
+        server_name = action_data['FaaSServer']
         server_config = workflow_data['ComputeServers'][server_name]
-        if server_config['FaaSType'].lower() == 'lambda':
-            lambda_functions[func_name] = func_data
+        faas_type = server_config['FaaSType'].lower()
+        if faas_type in ['lambda', 'aws_lambda', 'aws']:
+            lambda_actions[action_name] = action_data
     
-    if not lambda_functions:
-        print("No functions found for AWS Lambda deployment")
+    if not lambda_actions:
+        print("No actions found for AWS Lambda deployment")
         return
     
-    # Process each function in the workflow
-    for func_name, func_data in lambda_functions.items():
+    # Process each action in the workflow
+    for action_name, action_data in lambda_actions.items():
         try:
-            actual_func_name = func_data['FunctionName']
+            actual_func_name = action_data['FunctionName']
             
+            # Create prefixed function name using workflow_name-action_name format
+            prefixed_func_name = f"{json_prefix}-{action_name}"
+            
+            # Get container image for AWS Lambda (must be an Amazon ECR image URI)
+            container_image = workflow_data.get('ActionContainers', {}).get(action_name)
+            if not container_image:
+                container_image = '145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-tidyverse:latest'
+                print(f"No container specified for action '{action_name}', using default: {container_image}")
+ 
             # Check payload size before deployment
             payload_size = len(secret_payload.encode('utf-8'))
             if payload_size > 4000:  # Lambda env var limit is ~4KB
@@ -303,32 +505,23 @@ def deploy_to_aws(workflow_data):
                 'SECRET_PAYLOAD': secret_payload
             }
             
-            # Create or update Lambda function
+            # Check if function already exists first
             try:
-                lambda_client.create_function(
-                    FunctionName=func_name,
-                    PackageType='Image',
-                    Code={'ImageUri': '145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-tidyverse:latest'},
-                    Role=role_arn,
-                    Timeout=900,  
-                    MemorySize=1024,  
-                    Environment={'Variables': environment_vars}
-                )
-                print(f"Successfully created {func_name} on AWS Lambda")
-            except lambda_client.exceptions.ResourceConflictException:
+                existing_func = lambda_client.get_function(FunctionName=prefixed_func_name)
+                print(f"Function {prefixed_func_name} already exists, updating...")
                 # Update existing function
                 lambda_client.update_function_code(
-                    FunctionName=func_name,
-                    ImageUri='145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-tidyverse:latest'
+                    FunctionName=prefixed_func_name,
+                    ImageUri=container_image
                 )
                 
                 # Wait for the function update to complete
-                print(f"Waiting for {func_name} code update to complete...")
+                print(f"Waiting for {prefixed_func_name} code update to complete...")
                 max_attempts = 60  # Wait up to 5 minutes
                 attempt = 0
                 while attempt < max_attempts:
                     try:
-                        response = lambda_client.get_function(FunctionName=func_name)
+                        response = lambda_client.get_function(FunctionName=prefixed_func_name)
                         state = response['Configuration']['State']
                         last_update_status = response['Configuration']['LastUpdateStatus']
                         
@@ -345,18 +538,76 @@ def deploy_to_aws(workflow_data):
                         attempt += 1
                 
                 if attempt >= max_attempts:
-                    print(f"Timeout waiting for {func_name} update to complete")
+                    print(f"Timeout waiting for {prefixed_func_name} update to complete")
                     sys.exit(1)
                 
                 # Now update environment variables
                 lambda_client.update_function_configuration(
-                    FunctionName=func_name,
+                    FunctionName=prefixed_func_name,
                     Environment={'Variables': environment_vars}
                 )
-                print(f"Successfully updated {func_name} on AWS Lambda")
+                print(f"Successfully updated {prefixed_func_name} on AWS Lambda")
+                
+            except lambda_client.exceptions.ResourceNotFoundException:
+                # Function doesn't exist, create it
+                print(f"Creating new Lambda function: {prefixed_func_name}")
+                
+                # Create function with minimal parameters first, then update
+                print("Creating with minimal parameters...")
+                try:
+                    lambda_client.create_function(
+                        FunctionName=prefixed_func_name,
+                        PackageType='Image',
+                        Code={'ImageUri': container_image},
+                        Role=role_arn,
+                        Timeout=300,  # Shorter timeout
+                        MemorySize=128,  # Minimal memory
+                    )
+                    print(f"Successfully created {prefixed_func_name} with minimal parameters")
+                    
+                    # Wait for the function to become active before updating
+                    print(f"Waiting for {prefixed_func_name} to become active...")
+                    max_attempts = 60  # Wait up to 5 minutes
+                    attempt = 0
+                    while attempt < max_attempts:
+                        try:
+                            response = lambda_client.get_function(FunctionName=prefixed_func_name)
+                            state = response['Configuration']['State']
+                            
+                            if state == 'Active':
+                                print(f"Function {prefixed_func_name} is now active")
+                                break
+                            elif state == 'Failed':
+                                print(f"Function {prefixed_func_name} creation failed")
+                                sys.exit(1)
+                            else:
+                                print(f"Function state: {state}, waiting...")
+                                time.sleep(5)
+                                attempt += 1
+                        except Exception as e:
+                            print(f"Error checking function state: {str(e)}")
+                            time.sleep(5)
+                            attempt += 1
+                    
+                    if attempt >= max_attempts:
+                        print(f"Timeout waiting for {prefixed_func_name} to become active")
+                        sys.exit(1)
+                    
+                    # Now update with full configuration
+                    lambda_client.update_function_configuration(
+                        FunctionName=prefixed_func_name,
+                        Timeout=900,
+                        MemorySize=1024,
+                        Environment={'Variables': environment_vars}
+                    )
+                    print(f"Updated {prefixed_func_name} with full configuration")
+                    
+                except Exception as minimal_error:
+                    print(f"Minimal creation failed: {minimal_error}")
+                    raise minimal_error
             
         except Exception as e:
-            print(f"Error deploying {func_name} to AWS: {str(e)}")
+            print(f"Error deploying {prefixed_func_name} to AWS: {str(e)}")
             # Print additional debugging information
             if "RequestEntityTooLargeException" in str(e):
                 print(f"Payload too large. SECRET_PAYLOAD size: {len(secret_payload)} bytes")
@@ -383,20 +634,21 @@ def deploy_to_ow(workflow_data):
     # Get OpenWhisk credentials
     api_host, namespace, ssl = get_openwhisk_credentials(workflow_data)
     
-    # Get the JSON file prefix
-    workflow_file = workflow_data['_workflow_file']
-    json_prefix = os.path.splitext(os.path.basename(workflow_file))[0]
+    # Get the workflow name for prefixing
+    workflow_name = workflow_data.get('WorkflowName', 'default')
+    json_prefix = workflow_name
     
-    # Filter functions that should be deployed to OpenWhisk
-    ow_functions = {}
-    for func_name, func_data in workflow_data['FunctionList'].items():
-        server_name = func_data['FaaSServer']
+    # Filter actions that should be deployed to OpenWhisk
+    ow_actions = {}
+    for action_name, action_data in workflow_data['ActionList'].items():
+        server_name = action_data['FaaSServer']
         server_config = workflow_data['ComputeServers'][server_name]
-        if server_config['FaaSType'].lower() == 'openwhisk':
-            ow_functions[func_name] = func_data
+        faas_type = server_config['FaaSType'].lower()
+        if faas_type in ['openwhisk', 'open_whisk', 'ow']:
+            ow_actions[action_name] = action_data
     
-    if not ow_functions:
-        print("No functions found for OpenWhisk deployment")
+    if not ow_actions:
+        print("No actions found for OpenWhisk deployment")
         return
 
     
@@ -418,37 +670,43 @@ def deploy_to_ow(workflow_data):
     env = os.environ.copy()
     env['GODEBUG'] = 'x509ignoreCN=0'
     
-    # Process each function in the workflow
-    for func_name, func_data in ow_functions.items():
+    # Process each action in the workflow
+    for action_name, action_data in ow_actions.items():
         try:
-            actual_func_name = func_data['FunctionName']
+            actual_func_name = action_data['FunctionName']
+            
+            # Create prefixed function name using workflow_name-action_name format
+            prefixed_func_name = f"{json_prefix}-{action_name}"
             
             # Create or update OpenWhisk action using wsk CLI
             try:
                 # First check if action exists (add --insecure flag)
-                check_cmd = f"wsk action get {func_name} --insecure >/dev/null 2>&1"
+                check_cmd = f"wsk action get {prefixed_func_name} --insecure >/dev/null 2>&1"
                 exists = subprocess.run(check_cmd, shell=True, env=env).returncode == 0
+                
+                # Get container image, with fallback to default
+                container_image = workflow_data.get('ActionContainers', {}).get(action_name, 'ghcr.io/faasr/openwhisk-tidyverse')
                 
                 if exists:
                     # Update existing action (add --insecure flag)
-                    cmd = f"wsk action update {func_name} --docker {workflow_data['ActionContainers'][func_name]} --insecure"
+                    cmd = f"wsk action update {prefixed_func_name} --docker {container_image} --insecure"
                 else:
                     # Create new action (add --insecure flag)
-                    cmd = f"wsk action create {func_name} --docker {workflow_data['ActionContainers'][func_name]} --insecure"
+                    cmd = f"wsk action create {prefixed_func_name} --docker {container_image} --insecure"
                 
                 result = subprocess.run(cmd, shell=True, capture_output=True, text=True, env=env)
                 
                 if result.returncode != 0:
                     raise Exception(f"Failed to {'update' if exists else 'create'} action: {result.stderr}")
                 
-                print(f"Successfully deployed {func_name} to OpenWhisk")
+                print(f"Successfully deployed {prefixed_func_name} to OpenWhisk")
                 
             except Exception as e:
-                print(f"Error deploying {func_name} to OpenWhisk: {str(e)}")
+                print(f"Error deploying {prefixed_func_name} to OpenWhisk: {str(e)}")
                 sys.exit(1)
                 
         except Exception as e:
-            print(f"Error processing {func_name}: {str(e)}")
+            print(f"Error processing {prefixed_func_name}: {str(e)}")
             sys.exit(1)
 
 def main():
@@ -457,6 +715,15 @@ def main():
     
     # Store the workflow file path in the workflow data
     workflow_data['_workflow_file'] = args.workflow_file
+    
+    # Validate workflow for cycles and unreachable states
+    print("Validating workflow for cycles and unreachable states...")
+    try:
+        check_dag(workflow_data)
+        print("✓ Workflow validation passed - no cycles or unreachable states found")
+    except SystemExit:
+        print("✗ Workflow validation failed - check logs for details")
+        sys.exit(1)
     
     # Get all unique FaaSTypes from workflow data
     faas_types = set()
@@ -473,11 +740,11 @@ def main():
     # Deploy to each platform found
     for faas_type in faas_types:
         print(f"\nDeploying to {faas_type}...")
-        if faas_type == 'lambda':
+        if faas_type in ['lambda', 'aws_lambda', 'aws']:
             deploy_to_aws(workflow_data)
-        elif faas_type == 'githubactions':
+        elif faas_type in ['githubactions', 'github_actions', 'github']:
             deploy_to_github(workflow_data)
-        elif faas_type == 'openwhisk':
+        elif faas_type in ['openwhisk', 'open_whisk', 'ow']:
             deploy_to_ow(workflow_data)
         else:
             print(f"Warning: Unknown FaaSType '{faas_type}' - skipping")

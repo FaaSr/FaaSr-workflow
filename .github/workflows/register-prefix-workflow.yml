@@ -1,4 +1,4 @@
-name: Deploy FaaSr Functions
+name: Register FaaSr workflow with prefix
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
       - name: Set up Docker
         uses: docker/setup-buildx-action@v1
 
-      - name: Deploy
+      - name: Register Functions
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -50,5 +50,5 @@ jobs:
           MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
           GITHUB_TOKEN: ${{ secrets.PAT }}
         run: |
-          # Run deployment 
-          python scripts/deploy_functions.py --workflow-file ${{ github.event.inputs.workflow_file }} 
+          # Run function registration 
+          python scripts/register_workflow.py --workflow-file ${{ github.event.inputs.workflow_file }} 

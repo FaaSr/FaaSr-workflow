@@ -2,24 +2,12 @@
 
 This repository contains two powerful GitHub Actions workflows for deploying and triggering FaaSr (Function-as-a-Service for R) functions across multiple cloud platforms.
 
-## 📋 Table of Contents
-
-- [Overview](#overview)
-- [Prerequisites](#prerequisites)
-- [Setup](#setup)
-- [Workflows](#workflows)
-  - [Deploy Functions Workflow](#deploy-functions-workflow)
-  - [Trigger Function Workflow](#trigger-function-workflow)
-- [Configuration Files](#configuration-files)
-- [Usage Examples](#usage-examples)
-- [Troubleshooting](#troubleshooting)
-
 ## 🔍 Overview
 
 The FaaSr CLI provides two main workflows:
 
-1. **Deploy Functions** (`deploy-functions.yml`) - Deploys your FaaSr functions to supported cloud platforms
-2. **Trigger Function** (`trigger-function.yml`) - Executes deployed functions with your workflow configuration
+1. **Register Functions** (`register-workflow.yml`) - Registers your FaaSr functions to supported cloud platforms
+2. **Invoke Function** (`invoke-workflow.yml`) - Executes deployed functions with your workflow configuration
 
 ### Supported Platforms
 
@@ -31,7 +19,7 @@ The FaaSr CLI provides two main workflows:
 
 Before using these workflows, ensure you have:
 
-1. A GitHub repository with the FaaSr CLI code
+1. A fork copy of this repo
 2. Appropriate cloud platform accounts and credentials
 3. Workflow configuration files (JSON format)
 4. Required GitHub repository secrets configured
@@ -58,20 +46,20 @@ Configure the following secrets in your GitHub repository (`Settings > Secrets a
 
 ### 2. Workflow Configuration Files
 
-Create JSON configuration files in your repository root (examples: `project1.json`, `payload.json`). See [Configuration Files](#configuration-files) section for details.
+Create JSON configuration files in your repository root (examples: `project1.json`). See [Configuration Files](#configuration-files) section for details.
 
 ## 🚀 Workflows
 
-### Deploy Functions Workflow
+### Register Functions Workflow
 
-**File:** `.github/workflows/deploy-functions.yml`
+**File:** `.github/workflows/register-function.yml`
 
-**Purpose:** Deploys FaaSr functions to specified cloud platforms based on your workflow configuration.
+**Purpose:** Registers FaaSr functions to specified cloud platforms based on your workflow configuration.
 
 #### How to Run:
 
 1. Go to your repository's **Actions** tab
-2. Select **"Deploy FaaSr Functions"** workflow
+2. Select **"Register FaaSr Functions"** workflow
 3. Click **"Run workflow"**
 4. Enter parameters:
    - **Workflow file name**: Name of your JSON configuration file (default: `project1.json`)
@@ -82,7 +70,7 @@ Create JSON configuration files in your repository root (examples: `project1.jso
 - Reads your workflow configuration file
 - Identifies target platforms (Lambda, GitHub Actions, OpenWhisk)
 - Installs required dependencies and tools
-- Deploys functions to each specified platform:
+- Registers workflow to each specified platform:
   - **AWS Lambda**: Creates/updates Lambda functions with container images
   - **GitHub Actions**: Creates workflow files in `.github/workflows/`
   - **OpenWhisk**: Creates/updates actions using the OpenWhisk CLI
@@ -92,19 +80,19 @@ Create JSON configuration files in your repository root (examples: `project1.jso
 Workflow file: project1.json
 ```
 
-### Trigger Function Workflow
+### Invoke Function Workflow
 
-**File:** `.github/workflows/trigger-function.yml`
+**File:** `.github/workflows/invoke-function.yml`
 
-**Purpose:** Executes a deployed FaaSr function with your workflow configuration.
+**Purpose:** Executes a registered FaaSr function with your workflow configuration.
 
 #### How to Run:
 
 1. Go to your repository's **Actions** tab
-2. Select **"Trigger FaaSr Function"** workflow
+2. Select **"Invoke FaaSr Function"** workflow
 3. Click **"Run workflow"**
 4. Enter parameters:
-   - **Workflow file name**: Name of your JSON configuration file (default: `payload.json`)
+   - **Workflow file name**: Name of your JSON configuration file (default: `project1.json`)
    - **Function name**: (Optional) Specific function to trigger
 5. Click **"Run workflow"**
 
@@ -126,76 +114,7 @@ Function name: (leave empty to use FunctionInvoke from config)
 
 ## 📄 Configuration Files
 
-### Basic Structure
-
-Your JSON configuration files should follow this structure:
-
-```json
-{
-    "ComputeServers": {
-        "My_GitHub_Account": {
-            "FaaSType": "GitHubActions",
-            "UserName": "your-username",
-            "ActionRepoName": "your-repo-name",
-            "Branch": "main",
-            "Token": "My_GitHub_Account_TOKEN"
-        },
-        "My_Lambda_Account": {
-            "FaaSType": "Lambda",
-            "Region": "us-east-1",
-            "AccessKey": "My_Lambda_Account_ACCESS_KEY",
-            "SecretKey": "My_Lambda_Account_SECRET_KEY"
-        },
-        "My_OW_Account": {
-            "FaaSType": "OpenWhisk",
-            "Endpoint": "your-openwhisk-host",
-            "Namespace": "your-namespace",
-            "SSL": "true",
-            "API.key": "My_OW_Account_API_KEY"
-        }
-    },
-    "DataStores": {
-        "My_Minio_Bucket": {
-            "Endpoint": "https://play.min.io",
-            "Bucket": "your-bucket-name",
-            "Region": "us-east-1",
-            "Writable": "TRUE",
-            "AccessKey": "My_Minio_Bucket_ACCESS_KEY",
-            "SecretKey": "My_Minio_Bucket_SECRET_KEY"
-        }
-    },
-    "FunctionList": {
-        "function_name": {
-            "FunctionName": "actual_function_name",
-            "FaaSServer": "My_GitHub_Account",
-            "Arguments": {
-                "param1": "value1"
-            },
-            "InvokeNext": ["next_function"]
-        }
-    },
-    "ActionContainers": {
-        "function_name": "ghcr.io/faasr/github-actions-tidyverse"
-    },
-    "FunctionGitRepo": {
-        "actual_function_name": "owner/repository"
-    },
-    "FunctionInvoke": "function_name",
-    "LoggingDataStore": "My_Minio_Bucket",
-    "DefaultDataStore": "My_Minio_Bucket"
-}
-```
-
-### Key Fields Explained:
-
-- **ComputeServers**: Define your cloud platforms and credentials
-- **DataStores**: Configure data storage endpoints (MinIO, S3, etc.)
-- **FunctionList**: Define your functions and their execution flow
-- **ActionContainers**: Specify container images for each function
-- **FunctionGitRepo**: Map functions to their source repositories
-- **FunctionInvoke**: The entry point function for execution
-
-### Credential Placeholders:
+Your JSON configuration files should follow [FaaSr Workflow Schema](https://github.com/FaaSr/FaaSr-package/tree/main/schema)
 
 Use these placeholder patterns in your config files:
 - `{ServerName}_TOKEN` for GitHub tokens
@@ -204,44 +123,6 @@ Use these placeholder patterns in your config files:
 
 The workflows will automatically replace these with actual values from your repository secrets.
 
-## 💡 Usage Examples
-
-### Example 1: Deploy to GitHub Actions only
-
-1. Create `github-only.json`:
-```json
-{
-    "ComputeServers": {
-        "My_GitHub_Account": {
-            "FaaSType": "GitHubActions",
-            "UserName": "myusername",
-            "ActionRepoName": "my-faasr-project",
-            "Branch": "main",
-            "Token": "My_GitHub_Account_TOKEN"
-        }
-    },
-    "FunctionList": {
-        "hello_world": {
-            "FunctionName": "hello_function",
-            "FaaSServer": "My_GitHub_Account"
-        }
-    },
-    "ActionContainers": {
-        "hello_world": "ghcr.io/faasr/github-actions-tidyverse"
-    },
-    "FunctionInvoke": "hello_world"
-}
-```
-
-2. Run Deploy workflow with `github-only.json`
-3. Run Trigger workflow with `github-only.json`
-
-### Example 2: Multi-platform deployment
-
-1. Create `multi-platform.json` with both GitHub Actions and AWS Lambda servers
-2. Run Deploy workflow - functions will be deployed to both platforms
-3. Run Trigger workflow - will execute on the platform specified by `FunctionInvoke`
-
 ## 🔧 Troubleshooting
 
 ### Common Issues:
@@ -249,13 +130,13 @@ The workflows will automatically replace these with actual values from your repo
 1. **Missing secrets**: Ensure all required secrets are configured in your repository
 2. **Invalid JSON**: Validate your configuration files using a JSON validator
 3. **Permission errors**: Check that your tokens/keys have appropriate permissions
-4. **Function not found**: Verify function names match between config and deployed functions
+4. **Function not found**: Verify function names match between config and registered functions
 
 ### Debug Information:
 
 Both workflows provide detailed logging. Check the Actions logs for:
 - Configuration file parsing
-- Platform-specific deployment steps
+- Platform-specific registration steps
 - Function invocation responses
 - Error messages and stack traces
 
@@ -275,4 +156,4 @@ Both workflows provide detailed logging. Check the Actions logs for:
 
 ---
 
-*This guide covers the essential usage of FaaSr CLI workflows. For advanced configurations and custom implementations, refer to the source code in the `scripts/` directory.*
+*This guide covers the essential usage of FaaSr Workflow GitHub Actions. For advanced configurations and custom implementations, refer to the source code in the `scripts/` directory.*
