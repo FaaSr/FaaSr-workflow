@@ -1,0 +1,65 @@
+name: (FAASR REGISTER with new Secrets)
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_file:
+        description: 'Workflow JSON file name'
+        required: true
+        type: string
+        default: 'project1.json'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3 pyyaml PyGithub google-cloud-functions google-auth
+          pip install git+https://github.com/dekkov/FaaSr-Backend.git
+
+      - name: Install OpenWhisk CLI
+        run: |
+          # Download and install the latest OpenWhisk CLI for Linux
+          wget -q https://github.com/apache/openwhisk-cli/releases/download/1.2.0/OpenWhisk_CLI-1.2.0-linux-amd64.tgz
+          tar -xzf OpenWhisk_CLI-1.2.0-linux-amd64.tgz
+          sudo mv wsk /usr/local/bin/wsk
+          sudo chmod +x /usr/local/bin/wsk
+          # Verify installation
+          wsk --help
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SECRETKEY }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Register Functions
+        env:
+          AWS_ACCESSKEY: ${{ secrets.AWS_ACCESSKEY }}
+          AWS_SECRETKEY: ${{ secrets.AWS_SECRETKEY }}
+          AWS_ARN: ${{ secrets.AWS_ARN }}
+          OW_APIKEY: ${{ secrets.OW_APIKEY }}
+          MINIO_ACCESSKEY: ${{ secrets.MINIO_ACCESSKEY }}
+          MINIO_SECRETKEY: ${{ secrets.MINIO_SECRETKEY }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GCP_SECRETKEY: ${{ secrets.GCP_SECRETKEY }}
+          SLURM_TOKEN: ${{ secrets.SLURM_TOKEN }}
+          
+        run: |
+          # Run function registration 
+          python scripts/register_workflow.py --workflow-file ${{ github.event.inputs.workflow_file }} 
