@@ -43,19 +43,31 @@ class WorkflowMigrationAdapter:
             sys.exit(1)
     
     def _get_credentials(self):
-        """Get credentials from environment variables."""
+        """Get credentials from environment variables and workflow data."""
+        # Get GCP project ID from workflow data Namespace field
+        gcp_project_id = ''
+        for server_name, server_config in self.workflow_data.get('ComputeServers', {}).items():
+            faas_type = server_config.get('FaaSType', '').lower()
+            if faas_type in ['cloudfunctions', 'cloud_functions', 'gcp', 'gcf', 'googlecloud']:
+                gcp_project_id = server_config.get('Namespace', '')
+                break
+        
         return {
-            "My_GitHub_Account_TOKEN": os.getenv('GITHUB_TOKEN'),
-            "My_Minio_Bucket_ACCESS_KEY": os.getenv('MINIO_ACCESS_KEY'),
-            "My_Minio_Bucket_SECRET_KEY": os.getenv('MINIO_SECRET_KEY'),
-            "My_OW_Account_API_KEY": os.getenv('OW_API_KEY', ''),
-            "My_Lambda_Account_ACCESS_KEY": os.getenv('AWS_ACCESS_KEY_ID', ''),
-            "My_Lambda_Account_SECRET_KEY": os.getenv('AWS_SECRET_ACCESS_KEY', ''),
+            "My_GitHub_Account_TOKEN": os.getenv('GH_PAT'),
+            "My_Minio_Bucket_ACCESS_KEY": os.getenv('MINIO_ACCESSKEY'),
+            "My_Minio_Bucket_SECRET_KEY": os.getenv('MINIO_SECRETKEY'),
+            "My_OW_Account_API_KEY": os.getenv('OW_APIKEY', ''),
+            "My_Lambda_Account_ACCESS_KEY": os.getenv('AWS_ACCESSKEY', ''),
+            "My_Lambda_Account_SECRET_KEY": os.getenv('AWS_SECRETKEY', ''),
+            "My_GCP_Account_PROJECT_ID": gcp_project_id,
+            "My_GCP_Account_SERVICE_ACCOUNT_KEY": os.getenv('GCP_SECRETKEY', ''),
+            "My_SLURM_Account_TOKEN": os.getenv('SLURM_TOKEN', ''),
         }
     
     def _replace_credential_placeholders(self, workflow_data):
         """
         Replace credential placeholders in the workflow data with actual values.
+        Uses flexible pattern matching like register_workflow.py
         
         Args:
             workflow_data (dict): The workflow configuration
@@ -69,27 +81,55 @@ class WorkflowMigrationAdapter:
         # Replace placeholder values in ComputeServers with actual credentials
         if 'ComputeServers' in workflow_copy:
             for server_key, server_config in workflow_copy['ComputeServers'].items():
-                faas_type = server_config.get('FaaSType', '').lower()
+                faas_type = server_config.get('FaaSType', '')
                 
-                if faas_type in ['lambda', 'aws_lambda', 'aws']:
-                    if credentials['My_Lambda_Account_ACCESS_KEY']:
-                        server_config['AccessKey'] = credentials['My_Lambda_Account_ACCESS_KEY']
-                    if credentials['My_Lambda_Account_SECRET_KEY']:
-                        server_config['SecretKey'] = credentials['My_Lambda_Account_SECRET_KEY']
-                elif faas_type in ['githubactions', 'github_actions', 'github']:
-                    if credentials['My_GitHub_Account_TOKEN']:
-                        server_config['Token'] = credentials['My_GitHub_Account_TOKEN']
-                elif faas_type in ['openwhisk', 'open_whisk', 'ow']:
-                    if credentials['My_OW_Account_API_KEY']:
-                        server_config['API.key'] = credentials['My_OW_Account_API_KEY']
-        
+                # Replace placeholder values with actual credentials using pattern matching
+                if faas_type == 'Lambda':
+                    # Replace Lambda AccessKey/SecretKey placeholders
+                    if 'AccessKey' in server_config and server_config['AccessKey'] == f"{server_key}_ACCESS_KEY":
+                        if credentials['My_Lambda_Account_ACCESS_KEY']:
+                            server_config['AccessKey'] = credentials['My_Lambda_Account_ACCESS_KEY']
+                    if 'SecretKey' in server_config and server_config['SecretKey'] == f"{server_key}_SECRET_KEY":
+                        if credentials['My_Lambda_Account_SECRET_KEY']:
+                            server_config['SecretKey'] = credentials['My_Lambda_Account_SECRET_KEY']
+                elif faas_type == 'GitHubActions':
+                    # Replace GitHub Token placeholder
+                    if 'Token' in server_config and server_config['Token'] == f"{server_key}_TOKEN":
+                        if credentials['My_GitHub_Account_TOKEN']:
+                            server_config['Token'] = credentials['My_GitHub_Account_TOKEN']
+                elif faas_type == 'OpenWhisk':
+                    # Replace OpenWhisk API.key placeholder
+                    if 'API.key' in server_config and server_config['API.key'] == f"{server_key}_API_KEY":
+                        if credentials['My_OW_Account_API_KEY']:
+                            server_config['API.key'] = credentials['My_OW_Account_API_KEY']
+                elif faas_type in ['CloudFunctions', 'GoogleCloud']:
+                    # Replace GCP credentials placeholders
+                    # Handle Namespace field (project ID)
+                    if 'Namespace' in server_config and server_config['Namespace'] == f"{server_key}_PROJECT_ID":
+                        if credentials['My_GCP_Account_PROJECT_ID']:
+                            server_config['Namespace'] = credentials['My_GCP_Account_PROJECT_ID']
+                    # Handle ProjectID field (for backward compatibility)
+                    if 'ProjectID' in server_config and server_config['ProjectID'] == f"{server_key}_PROJECT_ID":
+                        if credentials['My_GCP_Account_PROJECT_ID']:
+                            server_config['ProjectID'] = credentials['My_GCP_Account_PROJECT_ID']
+                    # Handle ServiceAccountKey field
+                    if 'ServiceAccountKey' in server_config and server_config['ServiceAccountKey'] == f"{server_key}_SERVICE_ACCOUNT_KEY":
+                        if credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']:
+                            server_config['ServiceAccountKey'] = credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']
+                    # Handle SecretKey field (as seen in gcp.json)
+                    if 'SecretKey' in server_config and server_config['SecretKey'] in [f"{server_key}_SECRET_KEY", "GCP_SECRET_KEY"]:
+                        if credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']:
+                            server_config['SecretKey'] = credentials['My_GCP_Account_SERVICE_ACCOUNT_KEY']
+
         # Replace placeholder values in DataStores with actual credentials
         if 'DataStores' in workflow_copy:
             for store_key, store_config in workflow_copy['DataStores'].items():
-                if store_key == 'My_Minio_Bucket':
-                    if credentials['My_Minio_Bucket_ACCESS_KEY']:
+                # Replace placeholder values with actual credentials
+                if 'AccessKey' in store_config and store_config['AccessKey'] == f"{store_key}_ACCESS_KEY":
+                    if store_key == 'My_Minio_Bucket' and credentials['My_Minio_Bucket_ACCESS_KEY']:
                         store_config['AccessKey'] = credentials['My_Minio_Bucket_ACCESS_KEY']
-                    if credentials['My_Minio_Bucket_SECRET_KEY']:
+                if 'SecretKey' in store_config and store_config['SecretKey'] == f"{store_key}_SECRET_KEY":
+                    if store_key == 'My_Minio_Bucket' and credentials['My_Minio_Bucket_SECRET_KEY']:
                         store_config['SecretKey'] = credentials['My_Minio_Bucket_SECRET_KEY']
         
         return workflow_copy
