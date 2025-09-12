@@ -537,7 +537,48 @@ def deploy_to_aws(workflow_data):
             if not container_image:
                 container_image = '145342739029.dkr.ecr.us-east-1.amazonaws.com/aws-lambda-tidyverse:latest'
                 print(f"No container specified for action '{action_name}', using default: {container_image}")
- 
+
+            # Get MaxMemory and MaxRuntime values with fallback logic
+            # 1. First check action-level configuration
+            max_memory_mb = action_data.get('MaxMemory')
+            max_runtime_seconds = action_data.get('MaxRuntime')
+            
+            # 2. If not found at action level, check server-level configuration
+            if max_memory_mb is None or max_runtime_seconds is None:
+                server_name = action_data['FaaSServer']
+                server_config = workflow_data['ComputeServers'][server_name]
+                if max_memory_mb is None:
+                    max_memory_mb = server_config.get('MaxMemory')
+                if max_runtime_seconds is None:
+                    max_runtime_seconds = server_config.get('MaxRuntime')
+            
+            # 3. Apply default values if still not found
+            if max_memory_mb is None:
+                max_memory_mb = 1024  # Default 1GB
+            if max_runtime_seconds is None:
+                max_runtime_seconds = 900  # Default 15 minutes
+            
+            # Convert to Lambda format and validate limits
+            lambda_memory_mb = int(max_memory_mb)
+            lambda_timeout_seconds = int(max_runtime_seconds)
+            
+            # Validate Lambda limits
+            if lambda_memory_mb < 128:
+                lambda_memory_mb = 128
+                print(f"Warning: MaxMemory {max_memory_mb}MB is below Lambda minimum (128MB), using 128MB")
+            elif lambda_memory_mb > 10240:
+                lambda_memory_mb = 10240
+                print(f"Warning: MaxMemory {max_memory_mb}MB exceeds Lambda maximum (10240MB), using 10240MB")
+            
+            if lambda_timeout_seconds < 1:
+                lambda_timeout_seconds = 1
+                print(f"Warning: MaxRuntime {max_runtime_seconds}s is below Lambda minimum (1s), using 1s")
+            elif lambda_timeout_seconds > 900:
+                lambda_timeout_seconds = 900
+                print(f"Warning: MaxRuntime {max_runtime_seconds}s exceeds Lambda maximum (900s), using 900s")
+            
+            print(f"Using Lambda configuration for {prefixed_func_name}: Memory={lambda_memory_mb}MB, Timeout={lambda_timeout_seconds}s")
+
             # Check payload size before deployment
             payload_size = len(secret_payload.encode('utf-8'))
             if payload_size > 4000:  # Lambda env var limit is ~4KB
@@ -585,10 +626,12 @@ def deploy_to_aws(workflow_data):
                     print(f"Timeout waiting for {prefixed_func_name} update to complete")
                     sys.exit(1)
                 
-                # Now update environment variables
+                # Now update environment variables, memory, and timeout
                 lambda_client.update_function_configuration(
                     FunctionName=prefixed_func_name,
-                    Environment={'Variables': environment_vars}
+                    Environment={'Variables': environment_vars},
+                    MemorySize=lambda_memory_mb,
+                    Timeout=lambda_timeout_seconds
                 )
                 print(f"Successfully updated {prefixed_func_name} on AWS Lambda")
                 
@@ -604,8 +647,8 @@ def deploy_to_aws(workflow_data):
                         PackageType='Image',
                         Code={'ImageUri': container_image},
                         Role=role_arn,
-                        Timeout=300,  # Shorter timeout
-                        MemorySize=128,  # Minimal memory
+                        Timeout=min(300, lambda_timeout_seconds),  # Use shorter timeout for initial creation
+                        MemorySize=max(128, lambda_memory_mb),  # Use at least minimum memory
                     )
                     print(f"Successfully created {prefixed_func_name} with minimal parameters")
                     
@@ -640,8 +683,8 @@ def deploy_to_aws(workflow_data):
                     # Now update with full configuration
                     lambda_client.update_function_configuration(
                         FunctionName=prefixed_func_name,
-                        Timeout=900,
-                        MemorySize=1024,
+                        Timeout=lambda_timeout_seconds,
+                        MemorySize=lambda_memory_mb,
                         Environment={'Variables': environment_vars}
                     )
                     print(f"Updated {prefixed_func_name} with full configuration")
