@@ -56,7 +56,7 @@ def get_secrets_to_sync(args) -> List[str]:
     
     # Add data server secrets
     if args.data_server_secrets:
-        data_secrets = [s.strip() for s in args.data_server_secrets.split(",") if s.strip()]
+        data_secrets = [s.strip().upper() for s in args.data_server_secrets.split(",") if s.strip()]
         secrets.extend(data_secrets)
     
     return secrets
