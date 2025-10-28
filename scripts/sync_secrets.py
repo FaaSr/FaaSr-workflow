@@ -24,12 +24,12 @@ def parse_arguments():
     parser.add_argument("--GCP_SecretKey", action="store_true", help="Sync GCP_SecretKey secret")
     parser.add_argument("--SLURM_Token", action="store_true", help="Sync SLURM_Token secret")
     
-    # Additional secrets from data server
+    # Data server name
     parser.add_argument(
-        "--data-server-secrets",
+        "--data-server-name",
         type=str,
         default="",
-        help="Comma-separated list of additional secrets to sync"
+        help="Data server name (e.g., MinIO, AWS, GCP)"
     )
     
     # Cloud provider flags
@@ -55,9 +55,12 @@ def get_secrets_to_sync(args) -> List[str]:
             secrets.append(secret_name)
     
     # Add data server secrets
-    if args.data_server_secrets:
-        data_secrets = [s.strip().upper() for s in args.data_server_secrets.split(",") if s.strip()]
-        secrets.extend(data_secrets)
+    if args.data_server_name:
+        data_server_name = args.data_server_name.strip().upper()
+        # Automatically construct AccessKey and SecretKey secret names
+        access_key_secret = f"{data_server_name}_ACCESSKEY"
+        secret_key_secret = f"{data_server_name}_SECRETKEY"
+        secrets.extend([access_key_secret, secret_key_secret])
     
     return secrets
 
