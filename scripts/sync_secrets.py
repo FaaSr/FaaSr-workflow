@@ -9,20 +9,29 @@ import sys
 from typing import List, Optional
 
 
+# Mapping of servers to their associated secrets
+SERVER_SECRETS_MAP = {
+    'AWS': ['AWS_AccessKey', 'AWS_SecretKey', 'AWS_ARN'],
+    'GCP': ['GCP_SecretKey'],
+    'OW': ['OW_APIkey'],
+    'SLURM': ['SLURM_Token'],
+    'GH_PAT': ['GH_PAT']
+}
+
+
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Sync GitHub secrets to cloud secret managers"
     )
     
-    # Individual secret flags
-    parser.add_argument("--GH_PAT", action="store_true", help="Sync GH_PAT secret")
-    parser.add_argument("--OW_APIkey", action="store_true", help="Sync OW_APIkey secret")
-    parser.add_argument("--AWS_AccessKey", action="store_true", help="Sync AWS_AccessKey secret")
-    parser.add_argument("--AWS_SecretKey", action="store_true", help="Sync AWS_SecretKey secret")
-    parser.add_argument("--AWS_ARN", action="store_true", help="Sync AWS_ARN secret")
-    parser.add_argument("--GCP_SecretKey", action="store_true", help="Sync GCP_SecretKey secret")
-    parser.add_argument("--SLURM_Token", action="store_true", help="Sync SLURM_Token secret")
+    # Server selection
+    parser.add_argument(
+        "--server",
+        action="append",
+        choices=['AWS', 'GCP', 'OW', 'SLURM', 'GH_PAT'],
+        help="Server to sync secrets for (can be specified multiple times)"
+    )
     
     # Data server name
     parser.add_argument(
@@ -43,16 +52,11 @@ def get_secrets_to_sync(args) -> List[str]:
     """Build list of secrets to sync based on arguments."""
     secrets = []
     
-    # Check each boolean flag
-    secret_flags = [
-        "GH_PAT", "OW_APIkey", "AWS_AccessKey", "AWS_SecretKey",
-        "AWS_ARN", "GCP_SecretKey", "SLURM_Token"
-    ]
-    
-    for secret_name in secret_flags:
-        # Convert to attribute name (replace underscore with underscore for argparse)
-        if getattr(args, secret_name, False):
-            secrets.append(secret_name)
+    # Add secrets based on selected servers
+    if args.server:
+        for server_name in args.server:
+            server_secrets = SERVER_SECRETS_MAP.get(server_name, [])
+            secrets.extend(server_secrets)
     
     # Add data server secrets
     if args.data_server_name:
