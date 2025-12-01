@@ -122,116 +122,170 @@ def sync_to_aws(secrets: List[str], aws_region: str, aws_prefix: str) -> bool:
     return success
 
 
-def sync_to_gcp(secrets: List[str], project_id: str, gcp_prefix: str) -> bool:
-    """Sync secrets to Google Secret Manager."""
+def sync_to_gcp(secrets: List[str], project_id: str, gcp_prefix: str, access_token: str) -> bool:
+    """Sync secrets to Google Secret Manager using REST API."""
     try:
-        from google.cloud import secretmanager
-        from google.api_core import exceptions as gcp_exceptions
+        import requests
+        import base64
     except ImportError:
-        print("ERROR: google-cloud-secret-manager is not installed. Install it with: pip install google-cloud-secret-manager")
+        print("ERROR: requests is not installed. Install it with: pip install requests")
         return False
-    
+
     print(f"Syncing {len(secrets)} secret(s) to Google Secret Manager in project {project_id}")
-    
-    client = secretmanager.SecretManagerServiceClient()
-    parent = f"projects/{project_id}"
+
+    base_url = f"https://secretmanager.googleapis.com/v1/projects/{project_id}/secrets"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
     success = True
-    
+
     for secret_name in secrets:
         # Get secret value from environment
         secret_value = os.environ.get(secret_name)
-        
+
         if not secret_value or secret_value == "***":
             print(f"WARNING: Secret '{secret_name}' not found or not accessible. Skipping.")
             continue
-        
+
         gcp_secret_id = f"{gcp_prefix}{secret_name}"
-        secret_path = f"{parent}/secrets/{gcp_secret_id}"
-        
+        secret_url = f"{base_url}/{gcp_secret_id}"
+
         try:
             # Check if secret exists
-            try:
-                client.get_secret(name=secret_path)
+            response = requests.get(secret_url, headers=headers)
+
+            if response.status_code == 200:
                 # Secret exists, add new version
                 print(f"Adding new version to existing secret '{secret_name}' in GCP as '{gcp_secret_id}'...")
-                client.add_secret_version(
-                    parent=secret_path,
-                    payload={"data": secret_value.encode("utf-8")}
-                )
-                print(f"✓ Successfully added new version to '{gcp_secret_id}'")
-            except gcp_exceptions.NotFound:
+                version_url = f"{secret_url}:addVersion"
+                payload = {
+                    "payload": {
+                        "data": base64.b64encode(secret_value.encode("utf-8")).decode("utf-8")
+                    }
+                }
+                response = requests.post(version_url, json=payload, headers=headers)
+
+                if response.status_code in [200, 201]:
+                    print(f"✓ Successfully added new version to '{gcp_secret_id}'")
+                else:
+                    print(f"ERROR: Failed to add version to '{gcp_secret_id}': {response.text}")
+                    success = False
+
+            elif response.status_code == 404:
                 # Secret doesn't exist, create it
                 print(f"Creating secret '{secret_name}' in GCP as '{gcp_secret_id}'...")
-                secret = client.create_secret(
-                    parent=parent,
-                    secret_id=gcp_secret_id,
-                    secret={
-                        "replication": {"automatic": {}}
+                create_body = {
+                    "replication": {"automatic": {}}
+                }
+                create_params = {"secretId": gcp_secret_id}
+                response = requests.post(base_url, json=create_body, headers=headers, params=create_params)
+
+                if response.status_code in [200, 201]:
+                    # Add the initial version
+                    version_url = f"{base_url}/{gcp_secret_id}:addVersion"
+                    payload = {
+                        "payload": {
+                            "data": base64.b64encode(secret_value.encode("utf-8")).decode("utf-8")
+                        }
                     }
-                )
-                # Add the initial version
-                client.add_secret_version(
-                    parent=secret.name,
-                    payload={"data": secret_value.encode("utf-8")}
-                )
-                print(f"✓ Successfully created '{gcp_secret_id}'")
+                    response = requests.post(version_url, json=payload, headers=headers)
+
+                    if response.status_code in [200, 201]:
+                        print(f"✓ Successfully created '{gcp_secret_id}'")
+                    else:
+                        print(f"ERROR: Failed to add initial version to '{gcp_secret_id}': {response.text}")
+                        success = False
+                else:
+                    print(f"ERROR: Failed to create secret '{gcp_secret_id}': {response.text}")
+                    success = False
+            else:
+                print(f"ERROR: Failed to check secret '{gcp_secret_id}': {response.text}")
+                success = False
+
         except Exception as e:
             print(f"ERROR: Failed to sync '{secret_name}' to GCP: {e}")
             success = False
-    
+
     return success
 
 
 def main():
     """Main function."""
     args = parse_arguments()
-    
+
     # Validate that at least one cloud provider is selected
     if not args.sync_to_aws and not args.sync_to_gcp:
         print("ERROR: Must specify at least one cloud provider (--sync-to-aws or --sync-to-gcp)")
         sys.exit(1)
-    
+
     # Get list of secrets to sync
     secrets = get_secrets_to_sync(args)
-    
+
     if not secrets:
         print("No secrets selected to sync.")
         sys.exit(0)
-    
+
     print(f"Secrets to sync: {', '.join(secrets)}")
-    
+
     overall_success = True
-    
+
     # Sync to AWS if requested
     if args.sync_to_aws:
         aws_region = os.environ.get("AWS_REGION")
         aws_prefix = os.environ.get("AWS_SECRET_PREFIX", "")
-        
+
         if not aws_region:
             print("ERROR: AWS_REGION environment variable not set")
             sys.exit(1)
-        
+
         print("\n" + "=" * 60)
         print("AWS Secrets Manager Sync")
         print("=" * 60)
         if not sync_to_aws(secrets, aws_region, aws_prefix):
             overall_success = False
-    
+
     # Sync to GCP if requested
     if args.sync_to_gcp:
         gcp_project_id = os.environ.get("GCP_PROJECT_ID")
         gcp_prefix = os.environ.get("GCP_SECRET_PREFIX", "")
-        
+        gcp_secret_key = os.environ.get("GCP_SecretKey")
+
         if not gcp_project_id:
             print("ERROR: GCP_PROJECT_ID environment variable not set")
             sys.exit(1)
-        
+
+        if not gcp_secret_key:
+            print("ERROR: GCP_SecretKey environment variable not set")
+            sys.exit(1)
+
+        # Get access token using FaaSr_py helper (similar to register_workflow.py)
+        try:
+            from FaaSr_py.helpers.gcp_auth import refresh_gcp_access_token
+
+            # Create a minimal payload structure for the auth helper
+            temp_payload = {
+                "ComputeServers": {
+                    "GCP": {
+                        "SecretKey": gcp_secret_key
+                    }
+                }
+            }
+
+            print("Authenticating with GCP using PEM format...")
+            access_token = refresh_gcp_access_token(temp_payload, "GCP")
+            print("✓ Successfully authenticated with GCP")
+        except Exception as e:
+            print(f"ERROR: Failed to authenticate with GCP: {e}")
+            sys.exit(1)
+
         print("\n" + "=" * 60)
         print("Google Secret Manager Sync")
         print("=" * 60)
-        if not sync_to_gcp(secrets, gcp_project_id, gcp_prefix):
+        if not sync_to_gcp(secrets, gcp_project_id, gcp_prefix, access_token):
             overall_success = False
-    
+
     print("\n" + "=" * 60)
     if overall_success:
         print("✓ All secrets synced successfully")
