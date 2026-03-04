@@ -10,6 +10,7 @@ import sys
 import boto3
 import requests
 from botocore.exceptions import ClientError
+from FaaSr_py import graph_functions as faasr_gf
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,24 +73,21 @@ def get_required_secrets(workflow_data):
         faas_type = server_config.get("FaaSType", "").lower()
         
         if faas_type == "githubactions":
-            required_secrets.add("GH_PAT")
+            required_secrets.add(f"{server_name}_PAT")
         elif faas_type in ["lambda", "aws_lambda", "aws"]:
-            required_secrets.add("AWS_ACCESSKEY")
-            required_secrets.add("AWS_SECRETKEY")
-            required_secrets.add("AWS_ARN")
+            required_secrets.add(f"{server_name}_AccessKey")
+            required_secrets.add(f"{server_name}_SecretKey")
         elif faas_type == "googlecloud":
-            required_secrets.add("GCP_SECRETKEY")
-            # GoogleCloud also needs GH_PAT for GitHub Action invocation
-            required_secrets.add("GH_PAT")
+            required_secrets.add(f"{server_name}_SecretKey")
         elif faas_type == "openwhisk":
-            required_secrets.add("OW_APIKEY")
+            required_secrets.add(f"{server_name}_APIkey")
         elif faas_type == "slurm":
-            required_secrets.add("SLURM_TOKEN")
+            required_secrets.add(f"{server_name}_Token")
     
-    # Process DataStores - each store needs {NAME}_ACCESSKEY and {NAME}_SECRETKEY
+    # Process DataStores - each store needs {NAME}_AccessKey and {NAME}_SecretKey
     for store_name in workflow_data.get("DataStores", {}).keys():
-        required_secrets.add(f"{store_name}_ACCESSKEY")
-        required_secrets.add(f"{store_name}_SECRETKEY")
+        required_secrets.add(f"{store_name}_AccessKey")
+        required_secrets.add(f"{store_name}_SecretKey")
     
     return required_secrets
 
@@ -125,21 +123,27 @@ def filter_secrets(all_secrets, required_secrets):
 
 def get_aws_config(workflow_data, secrets):
     """Extract AWS credentials and region from secrets and workflow"""
-    aws_access_key = secrets.get("AWS_ACCESSKEY", "")
-    aws_secret_key = secrets.get("AWS_SECRETKEY", "")
+    # Find the Lambda server name to derive the correct secret key names
+    aws_server_name = None
+    region = None
+    for server_name, server_config in workflow_data.get("ComputeServers", {}).items():
+        if server_config.get("FaaSType", "").lower() in ["lambda", "aws_lambda", "aws"]:
+            aws_server_name = server_name
+            region = server_config.get("Region")
+            break
+
+    if not aws_server_name:
+        logger.error("No Lambda server configuration found in workflow ComputeServers")
+        sys.exit(1)
+
+    aws_access_key = secrets.get(f"{aws_server_name}_AccessKey", "")
+    aws_secret_key = secrets.get(f"{aws_server_name}_SecretKey", "")
     
     if not aws_access_key or not aws_secret_key:
-        logger.error("AWS_ACCESSKEY and AWS_SECRETKEY not found in secrets")
+        logger.error(f"{aws_server_name}_AccessKey and {aws_server_name}_SecretKey not found in secrets")
         sys.exit(1)
     
-    # Get region from ComputeServers or DataStores
-    region = None
-    for server_config in workflow_data.get("ComputeServers", {}).values():
-        if server_config.get("FaaSType", "").lower() in ["lambda", "aws_lambda", "aws"]:
-            region = server_config.get("Region")
-            if region:
-                break
-    
+    # Fall back to DataStores region if not found in ComputeServers
     if not region:
         for store_config in workflow_data.get("DataStores", {}).values():
             region = store_config.get("Region")
@@ -183,26 +187,28 @@ def sync_all_secrets_to_aws(client, secrets):
 
 def get_gcp_config(workflow_data, secrets):
     """Extract GCP configuration from workflow file and secrets"""
-    gcp_secret_key = secrets.get("GCP_SECRETKEY") or secrets.get("GCP_SecretKey")
+    # Find GCP server name and configuration
+    gcp_server_name = None
+    gcp_config = None
+    for server_name, server_config in workflow_data.get("ComputeServers", {}).items():
+        if server_config.get("FaaSType", "").lower() == "googlecloud":
+            gcp_server_name = server_name
+            gcp_config = server_config
+            break
+
+    if not gcp_config:
+        logger.error("No GoogleCloud configuration found in workflow ComputeServers")
+        sys.exit(1)
+
+    gcp_secret_key = secrets.get(f"{gcp_server_name}_SecretKey")
     
     if not gcp_secret_key:
-        logger.error("GCP_SECRETKEY not found in secrets")
+        logger.error(f"{gcp_server_name}_SecretKey not found in secrets")
         sys.exit(1)
     
     # Normalize PEM key: replace escaped newlines with actual newlines
     if '\\n' in gcp_secret_key:
         gcp_secret_key = gcp_secret_key.replace('\\n', '\n')
-    
-    # Find GCP configuration in ComputeServers
-    gcp_config = None
-    for server_config in workflow_data.get("ComputeServers", {}).values():
-        if server_config.get("FaaSType", "").lower() == "googlecloud":
-            gcp_config = server_config
-            break
-    
-    if not gcp_config:
-        logger.error("No GoogleCloud configuration found in workflow ComputeServers")
-        sys.exit(1)
     
     project_id = gcp_config.get("Namespace")
     client_email = gcp_config.get("ClientEmail")
@@ -212,7 +218,7 @@ def get_gcp_config(workflow_data, secrets):
         sys.exit(1)
     
     logger.info(f"GCP configuration extracted: project={project_id}")
-    return gcp_secret_key, project_id, client_email
+    return gcp_secret_key, project_id, client_email, gcp_server_name
 
 
 def sync_secret_to_gcp(headers, project_id, secret_name, secret_value):
@@ -272,6 +278,15 @@ def main():
     args = parse_arguments()
     workflow_data = read_workflow_file(args.workflow_file)
     logger.info(f"Successfully loaded workflow file: {args.workflow_file}")
+
+    # Validate workflow against FaaSr JSON schema
+    logger.info("Validating workflow against FaaSr JSON schema...")
+    try:
+        faasr_gf.check_dag(workflow_data)
+        logger.info("Workflow validation passed")
+    except SystemExit:
+        logger.error("Workflow validation failed - check logs for details")
+        sys.exit(1)
     
     all_secrets = read_github_secrets()
     
@@ -322,36 +337,25 @@ def main():
         logger.info("="*60)
         
         try:
-            gcp_secret_key, project_id, client_email = get_gcp_config(workflow_data, secrets)
+            gcp_secret_key, project_id, client_email, gcp_server_name = get_gcp_config(workflow_data, secrets)
+
+            from FaaSr_py.helpers.gcp_auth import refresh_gcp_access_token
             
-            # Find GCP server name and build payload for authentication
-            gcp_server_name = None
-            for server_name, server_config in workflow_data.get("ComputeServers", {}).items():
-                if server_config.get("FaaSType", "").lower() == "googlecloud":
-                    gcp_server_name = server_name
-                    break
+            gcp_server_config = workflow_data["ComputeServers"][gcp_server_name].copy()
+            gcp_server_config["SecretKey"] = gcp_secret_key
+            gcp_server_config.setdefault("Region", "us-central1")
             
-            if not gcp_server_name:
-                logger.error("No GoogleCloud server found in ComputeServers")
+            temp_payload = {"ComputeServers": {gcp_server_name: gcp_server_config}}
+            access_token = refresh_gcp_access_token(temp_payload, gcp_server_name)
+            
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            }
+            
+            if not sync_all_secrets_to_gcp(headers, project_id, secrets):
                 all_success = False
-            else:
-                from FaaSr_py.helpers.gcp_auth import refresh_gcp_access_token
-                
-                gcp_server_config = workflow_data["ComputeServers"][gcp_server_name].copy()
-                gcp_server_config["SecretKey"] = gcp_secret_key
-                gcp_server_config.setdefault("Region", "us-central1")
-                
-                temp_payload = {"ComputeServers": {gcp_server_name: gcp_server_config}}
-                access_token = refresh_gcp_access_token(temp_payload, gcp_server_name)
-                
-                headers = {
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {access_token}",
-                }
-                
-                if not sync_all_secrets_to_gcp(headers, project_id, secrets):
-                    all_success = False
                     
         except Exception as e:
             import traceback
