@@ -108,7 +108,7 @@ def filter_secrets(all_secrets, required_secrets):
         required_upper = required.upper()
         if required_upper in secrets_lower_map:
             original_key = secrets_lower_map[required_upper]
-            filtered[original_key] = all_secrets[original_key]
+            filtered[required] = all_secrets[original_key]
             matched_required.add(required)
     
     # Log which required secrets were found and which were missing
