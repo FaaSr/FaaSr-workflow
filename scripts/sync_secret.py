@@ -156,6 +156,18 @@ def get_aws_config(workflow_data, secrets):
     return aws_access_key, aws_secret_key, region
 
 
+def get_pulumi_org(workflow_data):
+    """Extract Pulumi organization name from workflow ComputeServers configuration"""
+    for server_config in workflow_data.get("ComputeServers", {}).values():
+        pulumi_org = server_config.get("PulumiOrg")
+        if pulumi_org:
+            logger.info(f"Pulumi organization extracted from workflow: {pulumi_org}")
+            return pulumi_org
+
+    logger.error("No PulumiOrg found in workflow ComputeServers")
+    sys.exit(1)
+
+
 def sync_secret_to_aws(client, secret_name, secret_value):
     """Sync a single secret to AWS Secrets Manager"""
     try:
@@ -392,13 +404,13 @@ def main():
         logger.info("SYNCING TO PULUMI ESC")
         logger.info("="*60)
 
-        pulumi_org_name = os.getenv("PULUMI_ORG_NAME")
-        if not pulumi_org_name:
-            logger.error("PULUMI_ORG_NAME environment variable not set")
-            all_success = False
-        else:
+        try:
+            pulumi_org_name = get_pulumi_org(workflow_data)
             if not sync_all_secrets_to_pulumi(pulumi_org_name, secrets):
                 all_success = False
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Pulumi sync failed: {e}")
+            all_success = False
     
     # Final status
     logger.info("\n" + "="*60)
