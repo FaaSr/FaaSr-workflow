@@ -11,6 +11,7 @@ import boto3
 import requests
 from botocore.exceptions import ClientError
 from FaaSr_py import graph_functions as faasr_gf
+from FaaSr_py.helpers.pulumi_provider import PulumiProvider
 
 logging.basicConfig(
     level=logging.INFO,
@@ -185,6 +186,27 @@ def sync_all_secrets_to_aws(client, secrets):
     return success == len(secrets)
 
 
+def sync_all_secrets_to_pulumi(org_name, secrets):
+    """Sync all GitHub secrets to Pulumi ESC"""
+    logger.info(f"Starting sync of {len(secrets)} secrets to Pulumi ESC (org: {org_name})...")
+    success = 0
+    try:
+        with PulumiProvider(org_name) as provider:
+            for name, value in secrets.items():
+                try:
+                    provider.set_secret(name, str(value) if value else "")
+                    logger.info(f"Set Pulumi secret: {name}")
+                    success += 1
+                except Exception as e:  # noqa: BLE001
+                    logger.error(f"Failed to set Pulumi secret {name}: {e}")
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Pulumi sync failed to initialize for org {org_name}: {e}")
+        return False
+
+    logger.info(f"Pulumi ESC sync complete: {success}/{len(secrets)} succeeded")
+    return success == len(secrets)
+
+
 def get_gcp_config(workflow_data, secrets):
     """Extract GCP configuration from workflow file and secrets"""
     # Find GCP server name and configuration
@@ -303,12 +325,13 @@ def main():
     
     sync_to_aws = os.getenv("SYNC_TO_AWS", "false").lower() == "true"
     sync_to_gcp = os.getenv("SYNC_TO_GCP", "false").lower() == "true"
+    sync_to_pulumi = os.getenv("SYNC_TO_PULUMI", "false").lower() == "true"
     
-    if not sync_to_aws and not sync_to_gcp:
-        logger.error("No sync target specified. Set SYNC_TO_AWS or SYNC_TO_GCP to true")
+    if not sync_to_aws and not sync_to_gcp and not sync_to_pulumi:
+        logger.error("No sync target specified. Set SYNC_TO_AWS, SYNC_TO_GCP, or SYNC_TO_PULUMI to true")
         sys.exit(1)
     
-    logger.info(f"Sync targets - AWS: {sync_to_aws}, GCP: {sync_to_gcp}")
+    logger.info(f"Sync targets - AWS: {sync_to_aws}, GCP: {sync_to_gcp}, Pulumi: {sync_to_pulumi}")
     all_success = True
     
     # Sync to AWS if enabled
@@ -362,6 +385,20 @@ def main():
             logger.error(f"GCP sync failed: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             all_success = False
+
+    # Sync to Pulumi if enabled
+    if sync_to_pulumi:
+        logger.info("\n" + "="*60)
+        logger.info("SYNCING TO PULUMI ESC")
+        logger.info("="*60)
+
+        pulumi_org_name = os.getenv("PULUMI_ORG_NAME")
+        if not pulumi_org_name:
+            logger.error("PULUMI_ORG_NAME environment variable not set")
+            all_success = False
+        else:
+            if not sync_all_secrets_to_pulumi(pulumi_org_name, secrets):
+                all_success = False
     
     # Final status
     logger.info("\n" + "="*60)
