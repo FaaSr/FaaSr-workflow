@@ -98,6 +98,9 @@ def generate_github_secret_imports(faasr_payload):
             case "SLURM":
                 token = f"{faas_name}_Token"
                 import_statements.append(f"{token}: ${{{{ secrets.{token}}}}}")
+            case "Kubernetes":
+                token = f"K8s_Token"
+                import_statements.append(f"{token}: ${{{{ secrets.{token}}}}}")
             case _:
                 logger.error(
                     f"Unknown FaaSType ({faas_type}) for compute server: {faas_name} - cannot generate secrets"  # noqa E501
@@ -1049,6 +1052,146 @@ def get_slurm_resource_requirements(action_name, action_config, server_config):
     return config
 
 
+def deploy_to_kubernetes(workflow_data):
+    """
+    Validate Kubernetes configuration and test connectivity
+    This function validates the configuration and tests the connection
+    
+    Args:
+        workflow_data: Full workflow JSON
+    """
+    logger.info("Validating Kubernetes configuration...")
+
+    # Find all of the Kubernetes actions
+    kubernetes_clusters = {}
+
+    for _, action_data in workflow_data["ActionList"].items():
+        cluster_name = action_data["FaaSServer"]
+        cluster_config = workflow_data["ComputeServers"][cluster_name]
+        faas_type = cluster_config.get("FaaSType", "")
+
+        if faas_type.lower() == "kubernetes":
+            if cluster_name not in kubernetes_clusters:
+                kubernetes_clusters[cluster_name] = cluster_config.copy()
+
+
+    if len(kubernetes_clusters) == 0:
+        logger.info("No actions found for Kubernetes deployment")
+        return
+    
+    for cluster_name, cluster_config in kubernetes_clusters.items():
+        validate_kubernetes_cluster_config(cluster_name, cluster_config)
+
+        if not test_kubernetes_connectivity(cluster_name, cluster_config):
+            logger.error(f"Failed to connect to Kubernetes cluster: {cluster_name}")
+            sys.exit(1)
+    
+    logger.info(
+        f"Kubernetes configuration validated successfully\n"
+        f"No persistent resources were created - this job will be submitted to the cluster at invocation time"
+    )
+
+
+def validate_kubernetes_cluster_config(cluster_name, cluster_config):
+    """
+    Valiate Kubernetes cluster configuration has required fields.
+    
+    ARgs:
+        cluster_name: Name of the Kubernetes server
+        cluster_config: Cluster configuration dictionary
+    """
+
+    required_fields = ["Endpoint"]
+    missing_fields = [f for f in required_fields if not cluster_config.get(f)]
+
+    if missing_fields:
+        logger.error(
+            f"Kubernetes cluster: {cluster_name} configuration is missing the following required fields: "
+            f"{', '.join(missing_fields)}"
+        )
+        sys.exit(1)
+    
+    logger.info(
+        f"Kubernetes cluster configuration validated: "
+        f"Connecting to: {cluster_config['Endpoint']}"
+    )
+
+
+def test_kubernetes_connectivity(cluster_name, cluster_config):
+    """
+    Test connectivity to the Kubernetes cluster REST API endpoint
+    
+    Args:
+        cluster_name: Name of the Kubernetes cluster
+        cluster_config: Server configuration dictionary
+    
+    Returns:
+        bool: True if the connectivity test passes
+    """
+
+    endpoint = cluster_config["Endpoint"]
+    namespace = cluster_config.get("Namespace", "default")
+
+    #Ensure the endpoint contains the needed protocol
+    if not endpoint.startswith("http"):
+        endpoint = f"https://{endpoint}"
+    
+    # Test the endpoint
+    jobs_url = f"{endpoint}/apis/batch/v1/namespaces/{namespace}/jobs"
+
+    headers = {"Accept": "application/json"}
+
+    kubernetes_token = os.getenv(f"K8s_Token")
+
+    if kubernetes_token:
+        headers["Authorization"] = f"Bearer {kubernetes_token}"
+
+        # Validate token format
+        if not kubernetes_token.startswith("eyJ"):
+            logger.error(
+                f"K8s_Token doesn't appear to be a valid JWT token for the cluster: {cluster_name}. This is required to schedule jobs!"
+            )
+            return False
+        
+    else:
+        logger.error(
+            f"K8s_Token must be provided to retrieve the jobs! Please ensure the value K8s_Token, with the appropriate JWT, is included in yours secrets!"
+        )
+
+        return False
+    
+
+    try:
+        response = requests.get(jobs_url, headers=headers, verify=False, timeout=10)
+
+        if response.status_code == 200:
+            logger.info(
+                f"Kubernetes cluster connectivity test passed for: {cluster_name} - "
+                f"The endpoint: {endpoint} is reachable and authentication is configured properly!"
+            )
+            logger.info(f"{response.text}")
+            return True
+        elif response.status_code in [401, 403]:
+            logger.info(
+                f"Kubernetes cluster endpoint reachable at: {cluster_name}"
+                "However, authentication is required to use Kubernetes!"
+            )
+
+            response.text
+            return False
+        else:
+            logger.error(
+                f"Kubernetes cluster connectivity test failed: HTTP {response.status_code} - "
+                f"{response.text[:200]}"
+            )
+            return False
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Kubernetes cluster connectivity error for '{cluster_name}': {e}")
+        return False
+            
+
+
 def main():
     args = parse_arguments()
     workflow_data = read_workflow_file(args.workflow_file)
@@ -1092,6 +1235,8 @@ def main():
             deploy_to_gcp(workflow_data)
         elif faas_type == "slurm":
             deploy_to_slurm(workflow_data)
+        elif faas_type == "kubernetes":
+            deploy_to_kubernetes(workflow_data)
         else:
             logger.error(f"Unsupported FaaSType: {faas_type}")
             sys.exit(1)

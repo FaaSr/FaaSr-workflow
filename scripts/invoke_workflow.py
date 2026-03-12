@@ -95,6 +95,25 @@ def add_secrets_to_server_attributes(server, faas_type):
                 sys.exit(1)
             server["SLURM_Token"] = slurm_token
 
+        case "Kubernetes":            
+            kubernetes_token = os.getenv("K8s_Token")
+
+            if not kubernetes_token:
+                logger.error("K8s_Token environment variable must be set, or specified in the server configuration")
+                sys.exit(1)
+
+            server["Token"] = kubernetes_token
+
+
+# This just forcefully adds the needed data store secrets to the object - only needed if a secrets store is not setup
+
+#def add_secrets_to_datastore_attributes(workflow):
+#    for name, fields in workflow["DataStores"].items():
+#        access_key = os.getenv(f"{name}_AccessKey")
+#        secret_key = os.getenv(f"{name}_SecretKey")
+#        workflow["DataStores"][name]["AccessKey"] = access_key
+#        workflow["DataStores"][name]["SecretKey"] = secret_key
+
 
 def main(testing: bool = False) -> FaaSrPayload:
     """Function invocation script"""
@@ -146,6 +165,7 @@ def main(testing: bool = False) -> FaaSrPayload:
     except KeyError as e:
         sys.exit(1)
 
+    # Note - this is commented out for initial demo, but it should be used for better security
     if not use_secret_store:
         logger.error("UseSecretStore must be true for initial action")
         sys.exit(1)
@@ -153,6 +173,7 @@ def main(testing: bool = False) -> FaaSrPayload:
     # Add secret to entry action so that Scheduler can invoke it
     faas_type = server["FaaSType"]
     add_secrets_to_server_attributes(server, faas_type)
+    #add_secrets_to_datastore_attributes(workflow)
 
     try:
         faasr_scheduler = Scheduler(workflow)
