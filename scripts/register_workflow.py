@@ -8,6 +8,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import base64
 
 import boto3
 import requests
@@ -1117,6 +1118,29 @@ def validate_kubernetes_cluster_config(cluster_name, cluster_config):
     )
 
 
+def validate_certificate(certificate):
+    """
+    Test that the certificate is in the correct format, and if it is base64 encoded, decode it to the proper format 
+
+    Args:
+        certificate: The string representing the certificate from the workflow
+
+    Returns:
+        string: The validated, or decoded certificate
+    """
+
+    if ("-----BEGIN CERTIFICATE-----" in certificate and "-----END CERTIFICATE-----" in certificate):
+        return (True, certificate)
+
+    else:
+        certificate = base64.b64decode(certificate).decode('utf-8')
+        if (certificate and "-----BEGIN CERTIFICATE-----" in certificate and "-----END CERTIFICATE-----" in certificate):
+           return (True, certificate)
+
+    return (False, None) 
+
+
+
 def test_kubernetes_connectivity(cluster_name, cluster_config):
     """
     Test connectivity to the Kubernetes cluster REST API endpoint
@@ -1131,6 +1155,13 @@ def test_kubernetes_connectivity(cluster_name, cluster_config):
 
     endpoint = cluster_config["Endpoint"]
     namespace = cluster_config.get("Namespace", "default")
+    certificate = cluster_config.get("SSLCertificate")
+
+    if (certificate != None):
+        (isValid, certificate) = validate_certificate(certificate)
+        if (not isValid):
+            logger.error(f"The provided certificate is invalid! Please either provide a valid certificate or remove it if unncessary!")
+            return False 
 
     #Ensure the endpoint contains the needed protocol
     if not endpoint.startswith("http"):
@@ -1151,6 +1182,7 @@ def test_kubernetes_connectivity(cluster_name, cluster_config):
             logger.error(
                 f"K8s_Token doesn't appear to be a valid JWT token for the cluster: {cluster_name}. This is required to schedule jobs!"
             )
+            
             return False
         
     else:
@@ -1159,10 +1191,20 @@ def test_kubernetes_connectivity(cluster_name, cluster_config):
         )
 
         return False
-    
+
+
+    s = requests.Session()
+
+    if (certificate):
+        with open("./temp.pem", "w") as certFile:
+            certFile.write(certificate)
+        
+        s.verify = "./temp.pem"
+
+    return_value = True
 
     try:
-        response = requests.get(jobs_url, headers=headers, verify=False, timeout=10)
+        response = s.get(jobs_url, headers=headers, timeout=10)
 
         if response.status_code == 200:
             logger.info(
@@ -1170,25 +1212,32 @@ def test_kubernetes_connectivity(cluster_name, cluster_config):
                 f"The endpoint: {endpoint} is reachable and authentication is configured properly!"
             )
             logger.info(f"{response.text}")
-            return True
+            
         elif response.status_code in [401, 403]:
             logger.info(
                 f"Kubernetes cluster endpoint reachable at: {cluster_name}"
-                "However, authentication is required to use Kubernetes!"
+                "However, authentication is required to use Kubernetes!",
+                f"{response.text[:200]}"
             )
 
-            response.text
-            return False
+            return_value = False
         else:
             logger.error(
                 f"Kubernetes cluster connectivity test failed: HTTP {response.status_code} - "
                 f"{response.text[:200]}"
             )
-            return False
-        
+
+            return_value = False
+    
+    except requests.exceptions.SSLError as e:
+        logger.error(f"Kubernetes cluster connectivity test failed for '{cluster_name}' due to an invalid SSL certificate! Either the certificate was not provided or is invalid: {e}")
     except requests.exceptions.RequestException as e:
         logger.error(f"Kubernetes cluster connectivity error for '{cluster_name}': {e}")
-        return False
+
+    if (certificate):
+        os.remove("./temp.pem")
+    return return_value
+
             
 
 
