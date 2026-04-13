@@ -1168,7 +1168,7 @@ def test_kubernetes_connectivity(cluster_name, cluster_config):
         endpoint = f"https://{endpoint}"
     
     # Test the endpoint
-    jobs_url = f"{endpoint}/apis/batch/v1/namespaces/{namespace}/jobs"
+    jobs_url = f"{endpoint}/apis/authorization.k8s.io/v1/selfsubjectaccessreviews"
 
     headers = {"Accept": "application/json"}
 
@@ -1192,8 +1192,20 @@ def test_kubernetes_connectivity(cluster_name, cluster_config):
 
         return False
 
-
     s = requests.Session()
+
+    job_payload = {
+        "apiVersion": "authorization.k8s.io/v1",
+        "kind": "SelfSubjectAccessReview",
+        "spec": {
+            "resourceAttributes": {
+                "namespace": f"{namespace}",
+                "verb": "create",
+                "group": "batch",
+                "resource": "jobs"
+            }
+        }
+    }
 
     if (certificate):
         with open("./temp.pem", "w") as certFile:
@@ -1204,15 +1216,25 @@ def test_kubernetes_connectivity(cluster_name, cluster_config):
     return_value = True
 
     try:
-        response = s.get(jobs_url, headers=headers, timeout=10)
+        response = s.post(jobs_url, headers=headers, timeout=10, json=job_payload)
 
-        if response.status_code == 200:
-            logger.info(
-                f"Kubernetes cluster connectivity test passed for: {cluster_name} - "
-                f"The endpoint: {endpoint} is reachable and authentication is configured properly!"
-            )
-            logger.info(f"{response.text}")
-            
+        if response.status_code == 200 or response.status_code == 201:
+            result_json = response.json()
+
+            if (result_json["status"]["allowed"] == True):
+                logger.info(
+                    f"Kubernetes cluster connectivity test passed for: {cluster_name} - "
+                    f"The endpoint: {endpoint} is reachable and authentication is configured properly!"
+                )
+            else:
+                logger.info(
+                    f"Kubernetes cluster endpoint reachable at: {cluster_name}"
+                    "However, this service account does not have the permissions needed to create a new job!"
+                    f"This is the additional error information: {response.text[:200]}"
+                )
+                return_value = False
+
+
         elif response.status_code in [401, 403]:
             logger.info(
                 f"Kubernetes cluster endpoint reachable at: {cluster_name}"
