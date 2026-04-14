@@ -95,6 +95,15 @@ def add_secrets_to_server_attributes(server, faas_type):
                 sys.exit(1)
             server["SLURM_Token"] = slurm_token
 
+        case "Kubernetes":            
+            kubernetes_token = os.getenv("K8s_Token")
+
+            if not kubernetes_token:
+                logger.error("K8s_Token environment variable must be set, or specified in the server configuration")
+                sys.exit(1)
+
+            server["Token"] = kubernetes_token
+
 
 def main(testing: bool = False) -> FaaSrPayload:
     """Function invocation script"""
@@ -144,10 +153,6 @@ def main(testing: bool = False) -> FaaSrPayload:
 
         use_secret_store = server.get("UseSecretStore", False)
     except KeyError as e:
-        sys.exit(1)
-
-    if not use_secret_store:
-        logger.error("UseSecretStore must be true for initial action")
         sys.exit(1)
 
     # Add secret to entry action so that Scheduler can invoke it
