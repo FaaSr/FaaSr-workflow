@@ -155,6 +155,10 @@ def main(testing: bool = False) -> FaaSrPayload:
     except KeyError as e:
         sys.exit(1)
 
+    if not use_secret_store:
+        logger.error("UseSecretStore must be true for initial action")
+        sys.exit(1)
+
     # Add secret to entry action so that Scheduler can invoke it
     faas_type = server["FaaSType"]
     add_secrets_to_server_attributes(server, faas_type)

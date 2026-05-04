@@ -12,6 +12,9 @@ import base64
 
 import boto3
 import requests
+import ssl
+
+from requests.adapters import HTTPAdapter
 from FaaSr_py import graph_functions as faasr_gf
 from github import Github
 
@@ -23,6 +26,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+class LaxSSLAdapter(HTTPAdapter):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        # Pass the custom context to urllib3's PoolManager
+        ctx = ssl.create_default_context()
+        ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+
+        pool_kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -1155,8 +1169,9 @@ def test_kubernetes_connectivity(cluster_name, cluster_config):
 
     endpoint = cluster_config["Endpoint"]
     namespace = cluster_config.get("Namespace", "default")
+    allowSelfSignedCertificate = cluster_config.get("AllowSelfSignedCertificate")
     certificate = cluster_config.get("SSLCertificate")
-
+    
     if (certificate != None):
         (isValid, certificate) = validate_certificate(certificate)
         if (not isValid):
@@ -1193,6 +1208,12 @@ def test_kubernetes_connectivity(cluster_name, cluster_config):
         return False
 
     s = requests.Session()
+
+    if (allowSelfSignedCertificate):
+        # Create an adapter that removes the stricter certificate checks
+        # Should allow self-signed certs
+        adapter = LaxSSLAdapter()
+        s.mount("https://", adapter)
 
     job_payload = {
         "apiVersion": "authorization.k8s.io/v1",
@@ -1253,8 +1274,10 @@ def test_kubernetes_connectivity(cluster_name, cluster_config):
     
     except requests.exceptions.SSLError as e:
         logger.error(f"Kubernetes cluster connectivity test failed for '{cluster_name}' due to an invalid SSL certificate! Either the certificate was not provided or is invalid: {e}")
+        return_value = False
     except requests.exceptions.RequestException as e:
         logger.error(f"Kubernetes cluster connectivity error for '{cluster_name}': {e}")
+        return_value = False
 
     if (certificate):
         os.remove("./temp.pem")
