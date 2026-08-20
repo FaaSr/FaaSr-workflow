@@ -50,6 +50,7 @@ jobs:
           GCP_SecretKey: ${{ secrets.GCP_SecretKey }}	
           SLURM_Token: ${{ secrets.SLURM_Token }}
           GH_PAT: ${{ secrets.GH_PAT }}
+          K8s_Token: ${{ secrets.K8s_Token }}
         run: |
           # Run function registration 
           python scripts/register_workflow.py --workflow-file ${{ github.event.inputs.workflow_file }} 

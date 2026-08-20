@@ -95,6 +95,15 @@ def add_secrets_to_server_attributes(server, faas_type):
                 sys.exit(1)
             server["SLURM_Token"] = slurm_token
 
+        case "Kubernetes":            
+            kubernetes_token = os.getenv("K8s_Token")
+
+            if not kubernetes_token:
+                logger.error("K8s_Token environment variable must be set, or specified in the server configuration")
+                sys.exit(1)
+
+            server["Token"] = kubernetes_token
+
 
 def main(testing: bool = False) -> FaaSrPayload:
     """Function invocation script"""
